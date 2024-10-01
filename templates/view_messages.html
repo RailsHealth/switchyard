@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}Messages - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="view-messages-container">
+        <div class="view-messages-header">
+            <h1>Messages</h1>
+            <p>View messages for {{ g.organization['name'] }}</p>
+        </div>
+
+        <div class="messages-actions">
+            <div class="new-message-button">
+                {% if g.user_role == 'admin' %}
+                    <a href="{{ url_for('messages.new_message') }}" class="btn btn-primary">+ New Message</a>
+                {% endif %}
+            </div>
+
+            <div class="filters-and-pagination">
+                <form id="filter-form" method="GET" action="{{ url_for('messages.view_messages') }}">
+                    {{ form.csrf_token }}
+                    <div class="filter-by">
+                        <select name="stream_uuid" id="stream-filter">
+                            <option value="">All Streams</option>
+                            {% for stream in streams %}
+                                <option value="{{ stream.uuid }}" {% if stream.uuid == selected_stream_uuid %}selected{% endif %}>
+                                    {{ stream.name }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        <select name="type" id="type-filter">
+                            <option value="all" {% if message_type == 'all' %}selected{% endif %}>All Types</option>
+                            <option value="HL7v2" {% if message_type == 'HL7v2' %}selected{% endif %}>HL7v2</option>
+                            <option value="FHIR" {% if message_type == 'FHIR' %}selected{% endif %}>FHIR</option>
+                            <option value="Clinical Notes" {% if message_type == 'Clinical Notes' %}selected{% endif %}>Clinical Notes</option>
+                            <option value="CCDA" {% if message_type == 'CCDA' %}selected{% endif %}>CCDA</option>
+                            <option value="X12" {% if message_type == 'X12' %}selected{% endif %}>X12</option>
+                        </select>
+                        <button type="submit" class="btn btn-secondary">Apply Filters</button>
+                    </div>
+                </form>
+
+                {% if total_pages > 0 %}
+                    <div class="pagination">
+                        <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+                        {% if page > 1 %}
+                            <a href="{{ url_for('messages.view_messages', page=page-1, stream_uuid=selected_stream_uuid, type=message_type) }}" class="page-link">Previous</a>
+                        {% endif %}
+                        {% if page < total_pages %}
+                            <a href="{{ url_for('messages.view_messages', page=page+1, stream_uuid=selected_stream_uuid, type=message_type) }}" class="page-link">Next</a>
+                        {% endif %}
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+
+        <div id="messages-list">
+            {% if grouped_messages %}
+                {% for date, messages in grouped_messages.items() %}
+                    <h2 id="{{ date }}" class="date-header" data-utc-date="{{ date }}">{{ date }}</h2>
+                    <div class="message-group">
+                        {% for message in messages %}
+                            <div class="card message-card" data-message-id="{{ message['_id'] }}">
+                                <div class="card-header">
+                                    <span class="message-time" data-utc-time="{{ message.timestamp.isoformat() if message.timestamp.isoformat is callable else message.timestamp }}">
+                                        {{ message.timestamp.strftime('%I:%M:%S %p') if message.timestamp.strftime is callable else message.timestamp }}
+                                    </span>
+                                    <span class="message-stream">Stream: {{ message.stream_name }}</span>
+                                    <span class="message-type">Type: {{ message.type }}</span>
+                                </div>
+                                <div class="card-body">
+                                    <pre class="message-content">{{ message.message | replace('\r', '\n') }}{% if not message.parsed %} (Unparsed){% endif %}</pre>
+                                    {% if message.truncated %}
+                                        <div class="truncation-notice">Message truncated. Click to view full message.</div>
+                                    {% endif %}
+                                </div>
+                                <div class="card-footer">
+                                    <a href="{{ url_for('messages.message_detail', message_id=message['_id']) }}" class="btn btn-link">View Details</a>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% endfor %}
+            {% else %}
+                <div id="empty-state" class="alert alert-info">
+                    No messages at this point. Messages will appear here once received.
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const csrfToken = "{{ csrf_token() }}";
+
+    // Helper function to parse date string
+    function parseDate(dateString) {
+        const parts = dateString.split('-');
+        if (parts.length === 3) {
+            return new Date(parts[0], parts[1] - 1, parts[2]);
+        }
+        return null;
+    }
+
+    // Helper function to get ordinal suffix
+    function getOrdinalSuffix(number) {
+        const j = number % 10,
+              k = number % 100;
+        if (j == 1 && k != 11) {
+            return "st";
+        }
+        if (j == 2 && k != 12) {
+            return "nd";
+        }
+        if (j == 3 && k != 13) {
+            return "rd";
+        }
+        return "th";
+    }
+
+    // Convert UTC times to local time
+    document.querySelectorAll('.message-time').forEach(function(el) {
+        const utcTime = new Date(el.getAttribute('data-utc-time'));
+        el.textContent = utcTime.toLocaleTimeString();
+    });
+
+    // Convert UTC dates to local timezone for date headers
+    document.querySelectorAll('.date-header').forEach(header => {
+        const dateStr = header.getAttribute('data-utc-date');
+        const localDate = parseDate(dateStr);
+
+        if (localDate) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            if (localDate.toDateString() === today.toDateString()) {
+                header.textContent = 'Today';
+            } else if (localDate.toDateString() === yesterday.toDateString()) {
+                header.textContent = 'Yesterday';
+            } else {
+                const options = { day: 'numeric', month: 'short', year: 'numeric' };
+                header.textContent = localDate.toLocaleDateString('en-US', options)
+                    .replace(/(\d+)/, (match, p1) => `${p1}${getOrdinalSuffix(p1)}`);
+            }
+        } else {
+            header.textContent = dateStr; // Fallback to original string if parsing fails
+        }
+    });
+
+    // Handle truncated messages
+    document.querySelectorAll('.truncation-notice').forEach(function(notice) {
+        notice.addEventListener('click', function() {
+            const messageId = this.closest('.message-card').getAttribute('data-message-id');
+            fetch(`/messages/${messageId}/full`, {
+                method: 'GET',
+                headers: {
+                    'X-CSRFToken': csrfToken
+                },
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    const messageContent = this.closest('.card-body').querySelector('.message-content');
+                    messageContent.textContent = data.full_message;
+                    this.style.display = 'none';
+                } else {
+                    alert('Error fetching full message: ' + data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('An error occurred while fetching the full message.');
+            });
+        });
+    });
+
+    // Filter functionality
+    const filterForm = document.getElementById('filter-form');
+    const streamFilter = document.getElementById('stream-filter');
+    const typeFilter = document.getElementById('type-filter');
+    const applyFiltersBtn = document.querySelector('.filter-by button');
+
+    function applyFilters() {
+        const streamUuid = streamFilter.value;
+        const messageType = typeFilter.value;
+        let url = new URL(window.location);
+        url.searchParams.set('stream_uuid', streamUuid);
+        url.searchParams.set('type', messageType);
+        url.searchParams.set('page', '1');  // Reset to first page when filtering
+        window.location = url.toString();
+    }
+
+    if (applyFiltersBtn) {
+        applyFiltersBtn.addEventListener('click', function(e) {
+            e.preventDefault();
+            applyFilters();
+        });
+    }
+
+    // Optional: Apply filters on select change
+    if (streamFilter) streamFilter.addEventListener('change', applyFilters);
+    if (typeFilter) typeFilter.addEventListener('change', applyFilters);
+
+    // Pagination functionality
+    const paginationLinks = document.querySelectorAll('.pagination .page-link');
+    paginationLinks.forEach(link => {
+        link.addEventListener('click', function(e) {
+            e.preventDefault();
+            let url = new URL(this.href);
+            url.searchParams.set('stream_uuid', streamFilter.value);
+            url.searchParams.set('type', typeFilter.value);
+            window.location = url.toString();
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "accounts_main.html" %}
+{% set active_tab = 'organizations' %}
+{% block tab_content %}
+
+<div class="organizations-content">
+    {% for org in organizations %}
+    <div class="organization-item">
+        <span class="organization-name">{{ org.name }}</span>
+        <a href="{{ url_for('accounts.organization_details', org_id=org.uuid) }}" class="btn btn-link">View Details</a>
+    </div>
+    {% endfor %}
+</div>
+
+{% endblock %}

@@ -1,0 +1,116 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="main-content" role="main">
+    <div class="create-new-org-container">
+        <div class="create-org-header">
+            <h1>Create New Organisation</h1>
+            <p>Create a new organization. You will have admin rights by default.</p>
+        </div>
+
+        <form class="create-new-org-form" method="POST" novalidate>
+            {{ form.csrf_token }}
+
+            <div class="form-group">
+                {{ form.name.label }}
+                {{ form.name(class="form-control", placeholder="Enter organization name", required=true) }}
+                {% if form.name.errors %}
+                    {% for error in form.name.errors %}
+                        <span class="error">{{ error }}</span>
+                    {% endfor %}
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                {{ form.org_type.label }}
+                <select id="{{ form.org_type.id }}" name="{{ form.org_type.name }}" class="form-control" required>
+                    <option value="" disabled selected>Select organization type</option>
+                    {% for org_type in config['ORGANIZATION_TYPES'] %}
+                        <option value="{{ org_type }}">{{ org_type }}</option>
+                    {% endfor %}
+                </select>
+                {% if form.org_type.errors %}
+                    {% for error in form.org_type.errors %}
+                        <span class="error">{{ error }}</span>
+                    {% endfor %}
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                {{ form.website.label }}
+                {{ form.website(class="form-control", placeholder="Enter website (optional)") }}
+                {% if form.website.errors %}
+                    {% for error in form.website.errors %}
+                        <span class="error">{{ error }}</span>
+                    {% endfor %}
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                {{ form.email.label }}
+                {{ form.email(class="form-control", placeholder="Enter contact email", required=true, type="email") }}
+                {% if form.email.errors %}
+                    {% for error in form.email.errors %}
+                        <span class="error">{{ error }}</span>
+                    {% endfor %}
+                {% endif %}
+            </div>
+
+            <div class="form-group">
+                {{ form.address.label }}
+                {{ form.address(class="form-control", placeholder="Enter address (optional)", rows="3") }}
+                {% if form.address.errors %}
+                    {% for error in form.address.errors %}
+                        <span class="error">{{ error }}</span>
+                    {% endfor %}
+                {% endif %}
+            </div>
+
+            <div class="form-actions">
+                <a href="{{ url_for('main.index') }}" class="btn btn-secondary">Cancel</a>
+                <button type="submit" class="btn btn-primary">Finish</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.querySelector('.create-new-org-form');
+        form.addEventListener('submit', function(event) {
+            let isValid = true;
+            const requiredFields = form.querySelectorAll('[required]');
+            requiredFields.forEach(function(field) {
+                if (!field.value.trim()) {
+                    isValid = false;
+                    const errorSpan = document.createElement('span');
+                    errorSpan.className = 'error';
+                    errorSpan.textContent = 'This field is required.';
+                    field.parentNode.appendChild(errorSpan);
+                }
+            });
+
+            const emailField = form.querySelector('#email');
+            if (emailField.value && !isValidEmail(emailField.value)) {
+                isValid = false;
+                const errorSpan = document.createElement('span');
+                errorSpan.className = 'error';
+                errorSpan.textContent = 'Please enter a valid email address.';
+                emailField.parentNode.appendChild(errorSpan);
+            }
+
+            if (!isValid) {
+                event.preventDefault();
+            }
+        });
+
+        function isValidEmail(email) {
+            const re = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
+            return re.test(email);
+        }
+    });
+</script>
+{% endblock %}

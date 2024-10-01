@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Organisation - Switchyard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="create-org-container">
+        <div class="create-org-content">
+            <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="Rails Health Logo" class="top-logo">
+            <img src="{{ url_for('static', filename='images/switchyard_logo.png') }}" alt="Switchyard Logo" class="main-logo">
+    
+            <h1>Switchyard</h1>
+            <h2>everything to FHIR</h2>
+    
+            <h3>Create Organisation</h3>
+            <p>Create your organisation and add users.<br>You have admin rights by default.</p>
+    
+            <form method="POST" action="{{ url_for('auth.create_organization') }}">
+                {{ form.csrf_token }}
+                <div class="form-group">
+                    <label for="org_type">Type of Organisation:</label>
+                    <select id="org_type" name="org_type" class="form-control" required>
+                        <option value="">Select organization type</option>
+                        {% for org_type in config['ORGANIZATION_TYPES'] %}
+                            <option value="{{ org_type }}">{{ org_type }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label for="name">Organization Name:</label>
+                    <input type="text" id="name" name="name" class="form-control" required>
+                </div>
+                <button type="submit" class="btn btn-primary">Finish</button>
+            </form>
+        </div>
+        <p class="disclaimer">This is an early experimental version. Please only use deidentified data.</p>
+    </div>
+    <script>
+        // Basic form validation
+        document.querySelector('form').addEventListener('submit', function(e) {
+            var name = document.querySelector('input[name="name"]').value;
+            var email = document.querySelector('input[name="contact_email"]').value;
+            var type = document.querySelector('select[name="type"]').value;
+
+            if (!name || !email || !type) {
+                e.preventDefault();
+                alert('Please fill in all required fields.');
+            }
+        });
+    </script>
+</body>
+</html>

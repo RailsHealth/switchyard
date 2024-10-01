@@ -1,0 +1,207 @@
+{% extends "base.html" %}
+{% block title %}View Streams - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="view-streams-container">
+        <div class="view-streams-header">
+            <h1>Input Streams</h1>
+            <p>View and manage configured input streams for {{ g.organization['name'] }}</p>
+        </div>
+
+        <div class="dashboard-card">
+            <div class="metric">
+                <span id="total-messages" class="metric-value">0</span>
+                <span class="metric-label">messages received</span>
+            </div>
+            <div class="metric">
+                <span id="converted-messages" class="metric-value">0</span>
+                <span class="metric-label">converted to FHIR</span>
+            </div>
+            <div class="metric">
+                <span id="avg-conversion-time" class="metric-value">0s</span>
+                <span class="metric-label">avg time to convert</span>
+            </div>
+        </div>
+
+        <div class="view-streams-actions">
+            <form id="filter-form" method="GET" action="{{ url_for('streams.view_streams') }}">
+                {{ form.csrf_token }}
+                <div class="filter-by">
+                    <select name="status_filter" id="status-filter">
+                        <option value="all" {% if status_filter == 'all' %}selected{% endif %}>All</option>
+                        <option value="active" {% if status_filter == 'active' %}selected{% endif %}>Active</option>
+                        <option value="inactive" {% if status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+                        <option value="deleted" {% if status_filter == 'deleted' %}selected{% endif %}>Deleted</option>
+                    </select>
+                    <select name="type_filter" id="type-filter">
+                        <option value="all" {% if type_filter == 'all' %}selected{% endif %}>All</option>
+                        <option value="HL7v2" {% if type_filter == 'HL7v2' %}selected{% endif %}>HL7v2</option>
+                        <option value="FHIR" {% if type_filter == 'FHIR' %}selected{% endif %}>FHIR</option>
+                        <option value="CCDA" {% if type_filter == 'CCDA' %}selected{% endif %}>CCDA</option>
+                        <option value="X12" {% if type_filter == 'X12' %}selected{% endif %}>X12</option>
+                        <option value="Clinical Notes" {% if type_filter == 'Clinical Notes' %}selected{% endif %}>Clinical Notes</option>
+                    </select>
+                </div>
+            </form>
+            {% if g.user_role == 'admin' %}
+                <a href="{{ url_for('streams.create_stream') }}" class="btn btn-primary new-stream-btn">+ New Stream</a>
+            {% endif %}
+        </div>
+
+        <div id="streams-list" class="stream-list">
+            {% for stream in streams %}
+                <div class="stream-card {% if stream.deleted %}deleted{% endif %}" data-stream-id="{{ stream.uuid }}">
+                    <div class="stream-card-content">
+                        <h3>{{ stream.name }}</h3>
+                        <div class="stream-details">
+                            <span class="stream-type">Type: {{ stream.message_type }}</span>
+                            {% if stream.message_type == 'HL7v2' %}
+                                <span class="stream-host">Host: {{ stream.host }}</span>
+                                <span class="stream-port">Port: {{ stream.port }}</span>
+                            {% elif stream.message_type == 'FHIR' %}
+                                <span class="stream-url">URL: {{ stream.url }}</span>
+                                <span class="stream-fhir-version">FHIR Version: {{ stream.fhir_version }}</span>
+                            {% endif %}
+                        </div>
+                        {% if stream.active %}
+                            <p>Active from: {{ stream.last_active.strftime('%d %b %Y, %I:%M %p') }}</p>
+                        {% elif stream.deleted %}
+                            <p>Deleted at: {{ stream.deleted_at.strftime('%d %b %Y, %I:%M %p') }}</p>
+                        {% else %}
+                            <p>Last active at: {{ stream.last_active.strftime('%d %b %Y, %I:%M %p') if stream.last_active else 'Never' }}</p>
+                        {% endif %}
+                    </div>
+                    <div class="stream-actions">
+                        {% if not stream.deleted %}
+                            {% if g.user_role == 'admin' %}
+                                <button class="btn {% if stream.active %}btn-warning{% else %}btn-success{% endif %} stream-action-btn" 
+                                        data-action="{{ 'stop' if stream.active else 'start' }}"
+                                        data-stream-id="{{ stream.uuid }}">
+                                    {{ 'Stop Listening' if stream.active else 'Start Listening' }}
+                                </button>
+                            {% endif %}
+                            <a href="{{ url_for('streams.stream_detail', uuid=stream.uuid) }}" class="btn btn-link view-details-btn">View Details</a>
+                        {% endif %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+
+        {% if total_pages > 1 %}
+            <div class="pagination">
+                <a href="{{ url_for('streams.view_streams', page=page-1, status=status_filter, type=type_filter) }}" class="page-link {% if page == 1 %}disabled{% endif %}">Previous</a>
+                <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+                <a href="{{ url_for('streams.view_streams', page=page+1, status=status_filter, type=type_filter) }}" class="page-link {% if page == total_pages %}disabled{% endif %}">Next</a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const csrfToken = "{{ csrf_token() }}";
+        
+        // Filter functionality
+        const filterForm = document.getElementById('filter-form');
+        const statusFilter = document.getElementById('status-filter');
+        const typeFilter = document.getElementById('type-filter');
+
+        function applyFilters() {
+            filterForm.submit();
+        }
+
+        if (statusFilter) statusFilter.addEventListener('change', applyFilters);
+        if (typeFilter) typeFilter.addEventListener('change', applyFilters);
+
+        // Start/Stop stream functionality
+        const streamActionBtns = document.querySelectorAll('.stream-action-btn');
+        streamActionBtns.forEach(btn => {
+            btn.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                const streamId = this.getAttribute('data-stream-id');
+                const action = this.getAttribute('data-action');
+                const originalText = this.textContent;
+                
+                // Set button state to 'processing'
+                this.textContent = action === 'start' ? 'Starting...' : 'Stopping...';
+                this.disabled = true;
+
+                fetch(`/streams/${streamId}/${action}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    },
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        // Update button state without page reload
+                        if (action === 'start') {
+                            this.textContent = 'Stop Listening';
+                            this.classList.remove('btn-success');
+                            this.classList.add('btn-warning');
+                            this.setAttribute('data-action', 'stop');
+                        } else {
+                            this.textContent = 'Start Listening';
+                            this.classList.remove('btn-warning');
+                            this.classList.add('btn-success');
+                            this.setAttribute('data-action', 'start');
+                        }
+                        this.disabled = false;
+                    } else {
+                        alert(`Error ${action}ing stream: ` + data.message);
+                        // Reset button state
+                        this.textContent = originalText;
+                        this.disabled = false;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert(`An error occurred while ${action}ing the stream.`);
+                    // Reset button state
+                    this.textContent = originalText;
+                    this.disabled = false;
+                });
+            });
+        });
+
+        // Prevent card click from redirecting
+        const streamCards = document.querySelectorAll('.stream-card');
+        streamCards.forEach(card => {
+            card.addEventListener('click', function(e) {
+                e.preventDefault();
+            });
+        });
+
+        // Allow "View Details" to redirect
+        const viewDetailsLinks = document.querySelectorAll('.view-details-btn');
+        viewDetailsLinks.forEach(link => {
+            link.addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+        });
+
+        // Fetch dashboard metrics
+        fetch('/streams/get_dashboard_metrics', {
+            method: 'GET',
+            headers: {
+                'X-CSRFToken': csrfToken
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            document.getElementById('total-messages').textContent = data.total_messages;
+            document.getElementById('converted-messages').textContent = data.converted_messages;
+            document.getElementById('avg-conversion-time').textContent = data.avg_conversion_time.toFixed(2) + 's';
+        })
+        .catch(error => console.error('Error fetching dashboard metrics:', error));
+
+    });
+
+    
+</script>
+{% endblock %}

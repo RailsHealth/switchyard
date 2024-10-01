@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="main-content">
+    <h1>Streams for {{ g.organization['name'] }}</h1>
+
+    {% if streams %}
+        <div id="streams-list">
+            {% for stream in streams %}
+                <div class="stream-card">
+                    <h3>{{ stream.name }}</h3>
+                    <p>Host: {{ stream.host }}</p>
+                    <p>Port: {{ stream.port }}</p>
+                    <a href="{{ url_for('streams.stream_detail', uuid=stream.uuid) }}" class="btn btn-primary">View Details</a>
+                </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <img src="{{ url_for('static', filename='images/empty-state-icon.svg') }}" alt="No streams">
+            <p>No streams configured yet.</p>
+            {% if g.user_role == 'admin' %}
+                <a href="{{ url_for('streams.create_stream') }}" class="btn btn-primary">Create your first stream</a>
+            {% else %}
+                <p>Please contact an administrator to create a stream.</p>
+            {% endif %}
+        </div>
+    {% endif %}
+</div>
+
+{% endblock %}

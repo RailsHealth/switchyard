@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}View Streams - Rails Health Interface{% endblock %}
+{% block content %}
+
+<div class="main-content">
+    <div class="view-streams-container">
+        <div class="view-streams-header">
+            <h1>View Streams</h1>
+            <p>View and manage configured streams for {{ g.organization['name'] }}</p>
+        </div>
+
+        <div class="view-streams-actions">
+            <div class="filter-by">
+                Filter by: All Active Inactive Deleted
+            </div>
+
+            {% if g.user_role == 'admin' %}
+            <a href="{{ url_for('streams.create_stream') }}" class="btn btn-primary new-stream-btn">+ New Stream</a>
+            {% endif %}
+        </div>
+
+        <div class="empty-state">
+            <img src="{{ url_for('static', filename='images/empty-state-icon.svg') }}" alt="No streams">
+            <p>Messages flow from one endpoint to another through streams.</p>
+            <p>No streams configured yet.</p>
+
+            {% if g.user_role == 'admin' %}
+            <a href="{{ url_for('streams.create_stream') }}" class="create-stream-link">Click here to configure your first stream.</a>
+            {% else %}
+            <p>Please contact an administrator to configure a stream.</p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<!-- Add any additional scripts here if needed -->
+{% endblock %}

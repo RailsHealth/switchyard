@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Edit Stream - {{ stream.name }}{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="edit-stream-container">
+        <div class="edit-stream-header">
+            <h1>Edit Stream: {{ stream.name }}</h1>
+            <p>Modify the stream parameters for {{ g.organization['name'] }}.</p>
+        </div>
+
+        <div class="breadcrumb">
+            <a href="{{ url_for('streams.view_streams') }}">Input Streams</a> /
+            <a href="{{ url_for('streams.stream_detail', uuid=stream.uuid) }}">{{ stream.name }}</a>
+            / Edit Stream
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="edit-stream-form">
+                <h2>
+                    {% if stream.message_type == 'HL7v2' %}
+                        HL7v2: Edit Listener Details for MLLP
+                    {% elif stream.message_type in ['CCDA', 'X12', 'Clinical Notes'] %}
+                        {{ stream.message_type }}: Edit SFTP Details
+                    {% else %}
+                        Edit Stream Details
+                    {% endif %}
+                </h2>
+
+                <form method="POST" action="{{ url_for('streams.edit_stream', uuid=stream.uuid) }}">
+                    {{ form.csrf_token }}
+
+                    <div class="form-group">
+                        {{ form.name.label }}
+                        {{ form.name(class="form-control") }}
+                    </div>
+
+                    {% if stream.message_type == 'HL7v2' %}
+                        <div class="form-group">
+                            {{ form.host.label }}
+                            {{ form.host(class="form-control") }}
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.port.label }}
+                            {{ form.port(class="form-control") }}
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.timeout.label }}
+                            {{ form.timeout(class="form-control") }}
+                        </div>
+
+                    {% elif stream.message_type in ['CCDA', 'X12', 'Clinical Notes'] %}
+                        <div class="form-group">
+                            {{ form.host.label }}
+                            {{ form.host(class="form-control") }}
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.port.label }}
+                            {{ form.port(class="form-control") }}
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.username.label }}
+                            {{ form.username(class="form-control") }}
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.auth_method.label }}
+                            {{ form.auth_method(class="form-control") }}
+                        </div>
+
+                        <div id="password_group" class="form-group" {% if stream.auth_method != 'password' %}style="display:none;"{% endif %}>
+                            {{ form.password.label }}
+                            {{ form.password(class="form-control") }}
+                        </div>
+
+                        <div id="private_key_group" class="form-group" {% if stream.auth_method != 'key' %}style="display:none;"{% endif %}>
+                            {{ form.private_key.label }}
+                            {{ form.private_key(class="form-control") }}
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.remote_path.label }}
+                            {{ form.remote_path(class="form-control") }}
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.file_pattern.label }}
+                            {{ form.file_pattern(class="form-control") }}
+                        </div>
+
+                        <div class="form-group">
+                            {{ form.fetch_interval.label }}
+                            {{ form.fetch_interval(class="form-control") }}
+                        </div>
+                    {% endif %}
+
+                    <div id="error-messages" class="error-messages"></div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Update Stream</button>
+                        <a href="{{ url_for('streams.stream_detail', uuid=stream.uuid) }}" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="error-message">
+                You do not have permission to edit this stream. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    {% if stream.message_type in ['CCDA', 'X12', 'Clinical Notes'] %}
+    document.getElementById('auth_method').addEventListener('change', function() {
+        var passwordGroup = document.getElementById('password_group');
+        var privateKeyGroup = document.getElementById('private_key_group');
+        if (this.value === 'password') {
+            passwordGroup.style.display = 'block';
+            privateKeyGroup.style.display = 'none';
+        } else {
+            passwordGroup.style.display = 'none';
+            privateKeyGroup.style.display = 'block';
+        }
+    });
+    {% endif %}
+
+    document.getElementById('editStreamForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        var errorMessages = document.getElementById('error-messages');
+        errorMessages.innerHTML = '';
+
+        var name = document.getElementById('name').value;
+        {% if stream.message_type == 'HL7v2' %}
+        var host = document.getElementById('host').value;
+        var port = document.getElementById('port').value;
+        var timeout = document.getElementById('timeout').value;
+        {% elif stream.message_type in ['CCDA', 'X12', 'Clinical Notes'] %}
+        var host = document.getElementById('host').value;
+        var port = document.getElementById('port').value;
+        var username = document.getElementById('username').value;
+        var authMethod = document.getElementById('auth_method').value;
+        var remotePath = document.getElementById('remote_path').value;
+        var fetchInterval = document.getElementById('fetch_interval').value;
+        {% endif %}
+
+        if (!name {% if stream.message_type == 'HL7v2' %} || !host || !port || !timeout {% elif stream.message_type in ['CCDA', 'X12', 'Clinical Notes'] %} || !host || !port || !username || !remotePath || !fetchInterval {% endif %}) {
+            errorMessages.innerHTML = 'Please fill in all required fields.';
+            return;
+        }
+
+        {% if stream.message_type in ['CCDA', 'X12', 'Clinical Notes'] %}
+        if (authMethod === 'password' && !document.getElementById('password').value) {
+            errorMessages.innerHTML = 'Password is required when using password authentication.';
+            return;
+        }
+
+        if (authMethod === 'key' && !document.getElementById('private_key').value) {
+            errorMessages.innerHTML = 'Private key is required when using SSH key authentication.';
+            return;
+        }
+        {% endif %}
+
+        var updateButton = document.getElementById('updateButton');
+        updateButton.disabled = true;
+        updateButton.textContent = 'Updating...';
+
+        fetch(this.action, {
+            method: 'POST',
+            body: new FormData(this),
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                window.location.href = data.redirect;
+            } else {
+                errorMessages.innerHTML = data.message;
+                updateButton.disabled = false;
+                updateButton.textContent = 'Update Stream';
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            errorMessages.innerHTML = 'An error occurred while updating the stream.';
+            updateButton.disabled = false;
+            updateButton.textContent = 'Update Stream';
+        });
+    });
+</script>
+{% endblock %}

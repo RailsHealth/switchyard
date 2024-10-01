@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}New Message - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="new-message-container">
+        <div class="new-message-header">
+            <h1>New Message</h1>
+            <p>Select a message type and paste the message for {{ g.organization['name'] }}.</p>
+        </div>
+
+        <div class="breadcrumb">
+            <a href="{{ url_for('messages.view_messages') }}">Messages</a> / New Message
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <form id="new-message-form" method="POST" action="{{ url_for('messages.create_message') }}">
+                {{ form.csrf_token }}
+                <p>Supports FHIR, HL7v2, Clinical Notes, CCDA, and X12</p>
+
+                <div class="drop-form-group">
+                    <label for="message_type">Select message type*:</label>
+                    <div class="new-select-wrapper">
+                        {{ form.message_type(class="form-control") }}
+                    </div>
+                    <div id="messageTypeError" class="error-message"></div>
+                </div>
+
+                <div class="text-form-group">
+                    <label for="message_content">Paste the message below:</label>
+                    {{ form.message_content(class="form-control", rows=10) }}
+                    <div id="messageContentError" class="error-message"></div>
+                </div>
+
+                <div class="form-actions">
+                    <a href="{{ url_for('messages.view_messages') }}" class="btn btn-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary">Save</button>
+                </div>
+            </form>
+        {% else %}
+            <div class="error-message">
+                You do not have permission to create a new message. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('new-message-form');
+    const messageTypeError = document.getElementById('messageTypeError');
+    const messageContentError = document.getElementById('messageContentError');
+
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();
+        messageTypeError.textContent = '';
+        messageContentError.textContent = '';
+
+        const formData = new FormData(form);
+        fetch('{{ url_for("messages.create_message") }}', {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                alert(data.message);
+                window.location.href = '{{ url_for("messages.view_messages") }}';
+            } else {
+                if (data.errors) {
+                    if (data.errors.message_type) {
+                        messageTypeError.textContent = data.errors.message_type;
+                    }
+                    if (data.errors.message_content) {
+                        messageContentError.textContent = data.errors.message_content;
+                    }
+                } else {
+                    alert('Error: ' + data.message);
+                }
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while saving the message.');
+        });
+    });
+});
+</script>
+{% endblock %}

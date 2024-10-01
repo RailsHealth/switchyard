@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Manage Accounts - Rails Health Interface{% endblock %}
+{% block content %}
+
+<div class="main-content">
+    <div class="manage-accounts-container">
+        <div class="manage-accounts-header">
+            <h1>Manage Accounts</h1>
+            <p>View and manage your organisations and profile</p>
+        </div>
+
+        <div class="account-tabs">
+            <a href="{{ url_for('accounts.profile') }}" class="tab-link {% if active_tab == 'profile' %}active{% endif %}">Profile</a>
+            <a href="{{ url_for('accounts.organizations') }}" class="tab-link {% if active_tab == 'organizations' %}active{% endif %}">Organisations</a>
+        </div>
+
+        <div class="tab-content">
+            {% block tab_content %}{% endblock %}
+        </div>
+    </div>
+</div>
+
+{% endblock %}

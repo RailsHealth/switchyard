@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}500 - Internal Server Error - Rails Health{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <h1 class="error-title">500: Internal Server Error</h1>
+    <img src="{{ url_for('static', filename='images/500-gears.svg') }}" alt="Broken gears" class="error-image">
+    <p class="error-message">Oh no! Our server's gears are grinding to a halt.</p>
+    <p class="error-description">Don't worry, our team of expert mechanics is already on it. We'll have things running smoothly again in no time!</p>
+    <a href="{{ url_for('main.index') }}" class="btn btn-primary">Return to Safety</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', (event) => {
+        const gears = document.querySelector('.error-image');
+        let rotation = 0;
+        setInterval(() => {
+            rotation += 5;
+            gears.style.transform = `rotate(${rotation}deg)`;
+        }, 50);
+    });
+</script>
+{% endblock %}

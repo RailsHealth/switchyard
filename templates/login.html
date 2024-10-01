@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Switchyard - Login</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap">
+</head>
+<body>
+    <div class="top-logo">
+        <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="Rails Health Logo">
+        <span>RAILS HEALTH</span>
+    </div>
+    <div class="login-container">
+        <div class="login-content">
+            <img src="{{ url_for('static', filename='images/switchyard_logo.png') }}" alt="Switchyard Logo" class="main-logo">
+            <p class="description">Connect with any health data source<br>and get a FHIR based output instantly.</p>
+            <p class="login-prompt">Create an account or login.</p>
+            {% if form %}
+                {{ form.csrf_token }}
+            {% endif %}
+            <a href="{{ url_for('auth.google_login') }}" class="btn-google">
+                <img src="{{ url_for('static', filename='images/google_logo.png') }}" alt="Google Logo">
+                Sign in with Google
+            </a>
+        </div>
+        <p class="disclaimer">This is an early experimental version. Please only use deidentified data.</p>
+    </div>
+</body>
+</html>

@@ -1,0 +1,26 @@
+{% extends "base.html" %}
+
+{% block title %}404 - Page Not Found - Rails Health{% endblock %}
+
+{% block content %}
+<div class="error-container">
+    <h1 class="error-title">404: Page Not Found</h1>
+    <img src="{{ url_for('static', filename='images/404-train.svg') }}" alt="Derailed train" class="error-image">
+    <p class="error-message">Oops! Looks like this train has gone off the rails.</p>
+    <p class="error-description">The page you're looking for seems to have derailed from our network. Don't worry, our expert Rails engineers are on the case!</p>
+    <a href="{{ url_for('main.index') }}" class="btn btn-primary">Back to the Station</a>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', (event) => {
+        const train = document.querySelector('.error-image');
+        train.style.transform = 'translateX(-100%)';
+        setTimeout(() => {
+            train.style.transition = 'transform 2s ease-in-out';
+            train.style.transform = 'translateX(0)';
+        }, 100);
+    });
+</script>
+{% endblock %}

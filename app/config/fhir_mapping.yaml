@@ -1,0 +1,1327 @@
+Device:
+  resourceType: Device
+  id: Device ID
+  identifier: Identifier
+  status: Status
+  type: Type
+  manufacturer: Manufacturer
+  manufactureDate: Manufacture Date
+  expirationDate: Expiration Date
+  udiCarrier: UDI Carrier
+  patient: Patient
+DocumentReference:
+  resourceType: DocumentReference
+  id: DocumentReference ID
+  status: Status
+  type: Type
+  subject: Subject
+  date: Date
+  author: Author
+  content: Content
+  context: Context
+FamilyMemberHistory:
+  ageAge: Age
+  ageRange: Age Range
+  ageString: Age Description
+  bornDate: Born Date
+  bornPeriod: Born Period
+  bornString: Born Description
+  condition: Condition
+  dataAbsentReason: Data Absent Reason
+  date: Date
+  deceasedAge: Deceased Age
+  deceasedBoolean: Deceased
+  deceasedDate: Deceased Date
+  deceasedRange: Deceased Range
+  deceasedString: Deceased Description
+  estimatedAge: Estimated Age
+  identifier: Family Member History Identifier
+  instantiatesCanonical: Instantiates Canonical
+  instantiatesUri: Instantiates URI
+  name: Name
+  note: Notes
+  patient: Patient
+  reasonCode: Reason
+  reasonReference: Reason Reference
+  relationship: Relationship
+  sex: Sex
+  status: Status
+ImagingStudy:
+  resourceType: ImagingStudy
+  id: ImagingStudy ID
+  identifier: Identifier
+  status: Status
+  modality: Modality
+  subject: Subject
+  started: Started
+  referrer: Referrer
+  endpoint: Endpoint
+  numberOfSeries: Number of Series
+  numberOfInstances: Number of Instances
+Location:
+  resourceType: Location
+  id: Location ID
+  identifier: Identifier
+  status: Status
+  name: Name
+  description: Description
+  address: Address
+  physicalType: Physical Type
+ServiceRequest:
+  resourceType: ServiceRequest
+  id: ServiceRequest ID
+  identifier: Identifier
+  status: Status
+  intent: Intent
+  category: Category
+  priority: Priority
+  code: Request Code
+  subject: Subject
+  authoredOn: Authored On
+  requester: Requester
+Specimen:
+  resourceType: Specimen
+  id: Specimen ID
+  identifier: Identifier
+  status: Status
+  type: Specimen Type
+  subject: Subject
+  receivedTime: Received Time
+  collection:
+    collector: Collector
+    collectedDateTime: Collected Date and Time
+    quantity: Quantity
+  processing: Processing
+  container: Container
+Encounter:
+  resourceType: Encounter
+  id: Encounter ID
+  status: Status
+  class: Class
+  type: Encounter Type
+  subject: Subject
+  participant: Participant
+  period: Period
+  reasonCode: Reason for Encounter
+  diagnosis: Diagnosis
+Goal:
+  resourceType: Goal
+  id: Goal ID
+  identifier: Identifier
+  lifecycleStatus: Lifecycle Status
+  achievementStatus: Achievement Status
+  category: Category
+  description: Description
+  subject: Subject
+  startDate: Start Date
+  target: Target
+Immunization:
+  resourceType: Immunization
+  id: Immunization ID
+  status: Status
+  vaccineCode: Vaccine Code
+  patient: Patient
+  occurrenceDateTime: Occurrence Date and Time
+  primarySource: Primary Source
+  lotNumber: Lot Number
+  expirationDate: Expiration Date
+MedicationRequest:
+  resourceType: MedicationRequest
+  id: MedicationRequest ID
+  status: Status
+  intent: Intent
+  medicationCodeableConcept: Medication
+  subject: Subject
+  authoredOn: Authored On
+  requester: Requester
+  dosageInstruction: Dosage Instructions
+  dispenseRequest: Dispense Request
+Organization:
+  resourceType: Organization
+  id: Organization ID
+  identifier: Identifier
+  active: Active
+  name: Name
+  telecom: Telecom
+  address: Address
+Practitioner:
+  resourceType: Practitioner
+  id: Practitioner ID
+  identifier: Identifier
+  active: Active
+  name: Name
+  telecom: Telecom
+  address: Address
+  gender: Gender
+  birthDate: Birth Date
+PractitionerRole:
+  resourceType: PractitionerRole
+  id: PractitionerRole ID
+  practitioner: Practitioner
+  organization: Organization
+  code: Role Code
+  specialty: Specialty
+  telecom: Telecom
+  period: Period
+  location: Location
+  healthcareService: Healthcare Service
+RelatedPerson:
+  resourceType: RelatedPerson
+  id: RelatedPerson ID
+  identifier: Identifier
+  active: Active
+  patient: Patient
+  relationship: Relationship
+  name: Name
+  telecom: Telecom
+  address: Address
+  gender: Gender
+  birthDate: Birth Date
+AllergyIntolerance:
+  resourceType: AllergyIntolerance
+  id: AllergyIntolerance ID
+  clinicalStatus: Clinical Status
+  verificationStatus: Verification Status
+  category: Category
+  code: Allergy Code
+  patient: Patient
+  onsetDateTime: Onset Date and Time
+  note: Note
+CarePlan:
+  resourceType: CarePlan
+  id: CarePlan ID
+  status: Status
+  intent: Intent
+  category: Category
+  subject: Subject
+  period: Period
+  careTeam: Care Team
+  activity: Activity
+  goal: Goal
+CareTeam:
+  resourceType: CareTeam
+  id: CareTeam ID
+  identifier: Identifier
+  status: Status
+  category: Category
+  name: Name
+  subject: Subject
+  period: Period
+  participant: Participant
+  reasonCode: Reason for CareTeam
+Condition:
+  resourceType: Condition
+  id: Condition ID
+  clinicalStatus: Clinical Status
+  verificationStatus: Verification Status
+  category: Category
+  severity: Severity
+  code: Condition Code
+  bodySite: Body Site
+  subject: Subject
+  onsetDateTime: Onset Date and Time
+DiagnosticReport:
+  resourceType: DiagnosticReport
+  id: DiagnosticReport ID
+  status: Status
+  category: Category
+  code: Report Code
+  subject: Subject
+  effectiveDateTime: Effective Date and Time
+  issued: Issued
+  performer: Performer
+  result: Result
+Medication:
+  resourceType: Medication
+  id: Medication ID
+  code: Medication Code
+  status: Status
+  form: Form
+  ingredient: Ingredient
+  batch:
+    lotNumber: Lot Number
+    expirationDate: Expiration Date
+Observation:
+  resourceType: Observation
+  id: Observation ID
+  status: Status
+  category: Category
+  code: Observation Code
+  subject: Subject
+  effectiveDateTime: Effective Date and Time
+  valueQuantity:
+    value: Value
+    unit: Unit
+  interpretation: Interpretation
+  referenceRange: Reference Range
+Patient:
+  resourceType: Patient
+  id: Patient ID
+  identifier: Identifier
+  active: Active
+  name: Name
+  telecom: Telecom
+  gender: Gender
+  birthDate: Birth Date
+  address: Address
+  maritalStatus: Marital Status
+  contact: Contact
+  communication: Communication
+Procedure:
+  resourceType: Procedure
+  id: Procedure ID
+  status: Status
+  category: Category
+  code: Procedure Code
+  subject: Subject
+  performedDateTime: Performed Date and Time
+  performer: Performer
+  reasonCode: Reason for Procedure
+common:
+  extension: Additional Information
+  id: Identifier
+  meta: Metadata
+  modifierExtension: Modifier Extension
+  text: Narrative Text
+Appointment:
+  resourceType: Appointment
+  id: Appointment ID
+  status: Status
+  serviceCategory: Service Category
+  serviceType: Service Type
+  specialty: Specialty
+  appointmentType: Appointment Type
+  reasonCode: Reason for Appointment
+  start: Start
+  end: End
+  participant: Participant
+ObservationDefinition:
+  resourceType: ObservationDefinition
+  id: ObservationDefinition ID
+  identifier: Identifier
+  status: Status
+  category: Category
+  code: Observation Code
+  permittedDataType: Permitted Data Type
+  multipleResultsAllowed: Multiple Results Allowed
+  method: Method
+  preferredReportName: Preferred Report Name
+  quantitativeDetails: Quantitative Details
+PlanDefinition:
+  resourceType: PlanDefinition
+  id: PlanDefinition ID
+  identifier: Identifier
+  status: Status
+  type: Type
+  subject: Subject
+  title: Title
+  description: Description
+  goal: Goal
+  action: Action
+Communication:
+  resourceType: Communication
+  id: Communication ID
+  identifier: Identifier
+  status: Status
+  category: Category
+  priority: Priority
+  topic: Topic
+  subject: Subject
+  sent: Sent
+  received: Received
+  sender: Sender
+  recipient: Recipient
+CommunicationRequest:
+  resourceType: CommunicationRequest
+  id: CommunicationRequest ID
+  identifier: Identifier
+  status: Status
+  priority: Priority
+  topic: Topic
+  subject: Subject
+  authoredOn: Authored On
+  requester: Requester
+  recipient: Recipient
+  payload: Payload
+Consent:
+  resourceType: Consent
+  id: Consent ID
+  identifier: Identifier
+  status: Status
+  scope: Scope
+  category: Category
+  patient: Patient
+  dateTime: Date and Time
+  performer: Performer
+  organization: Organization
+  source: Source
+RiskAssessment:
+  resourceType: RiskAssessment
+  id: RiskAssessment ID
+  identifier: Identifier
+  status: Status
+  method: Method
+  code: Risk Code
+  subject: Subject
+  occurrenceDateTime: Occurrence Date and Time
+  condition: Condition
+  performer: Performer
+  prediction: Prediction
+ClinicalImpression:
+  resourceType: ClinicalImpression
+  id: ClinicalImpression ID
+  status: Status
+  description: Description
+  subject: Subject
+  date: Date
+  assessor: Assessor
+  problem: Problem
+  prognosisCodeableConcept: Prognosis
+Provenance:
+  resourceType: Provenance
+  id: Provenance ID
+  target: Target
+  recorded: Recorded
+  agent: Agent
+  entity: Entity
+  signature: Signature
+ProcedureRequest:
+  resourceType: ProcedureRequest
+  id: ProcedureRequest ID
+  status: Status
+  intent: Intent
+  priority: Priority
+  subject: Subject
+  code: Procedure Code
+  authoredOn: Authored On
+  requester: Requester
+NutritionOrder:
+  resourceType: NutritionOrder
+  id: NutritionOrder ID
+  status: Status
+  intent: Intent
+  patient: Patient
+  dateTime: Date and Time
+  orderer: Orderer
+  allergyIntolerance: Allergy Intolerance
+  foodPreferenceModifier: Food Preference Modifier
+  oralDiet: Oral Diet
+DeviceRequest:
+  resourceType: DeviceRequest
+  id: DeviceRequest ID
+  status: Status
+  intent: Intent
+  priority: Priority
+  codeReference: Device Reference
+  subject: Subject
+  authoredOn: Authored On
+  requester: Requester
+  performerType: Performer Type
+ImmunizationRecommendation:
+  resourceType: ImmunizationRecommendation
+  id: ImmunizationRecommendation ID
+  identifier: Identifier
+  status: Status
+  date: Date
+  patient: Patient
+  recommendation:
+    vaccineCode: Vaccine Code
+    targetDisease: Target Disease
+    doseNumberPositiveInt: Dose Number
+    forecastStatus: Forecast Status
+ExplanationOfBenefit:
+  resourceType: ExplanationOfBenefit
+  id: ExplanationOfBenefit ID
+  status: Status
+  type: Type
+  patient: Patient
+  billablePeriod: Billable Period
+  created: Created
+  provider: Provider
+  insurance: Insurance
+  item: Item
+  payment: Payment
+PaymentNotice:
+  resourceType: PaymentNotice
+  id: PaymentNotice ID
+  status: Status
+  request: Request
+  response: Response
+  created: Created
+  provider: Provider
+  paymentStatus: Payment Status
+Coverage:
+  resourceType: Coverage
+  id: Coverage ID
+  status: Status
+  type: Type
+  policyHolder: Policy Holder
+  subscriber: Subscriber
+  beneficiary: Beneficiary
+  period: Period
+  payor: Payor
+Account:
+  resourceType: Account
+  id: Account ID
+  status: Status
+  type: Type
+  name: Name
+  subject: Subject
+  servicePeriod: Service Period
+  coverage: Coverage
+  owner: Owner
+Claim:
+  resourceType: Claim
+  id: Claim ID
+  status: Status
+  type: Type
+  use: Use
+  patient: Patient
+  billablePeriod: Billable Period
+  created: Created
+  provider: Provider
+  priority: Priority
+  insurance: Insurance
+  item: Item
+ClaimResponse:
+  resourceType: ClaimResponse
+  id: ClaimResponse ID
+  status: Status
+  type: Type
+  use: Use
+  patient: Patient
+  created: Created
+  insurer: Insurer
+  request: Request
+  outcome: Outcome
+  disposition: Disposition
+  payment: Payment
+MedicationAdministration:
+  resourceType: MedicationAdministration
+  id: MedicationAdministration ID
+  status: Status
+  category: Category
+  medicationCodeableConcept: Medication
+  subject: Subject
+  effectiveDateTime: Effective Date and Time
+  performer: Performer
+  dosage: Dosage
+  reasonCode: Reason
+MedicationDispense:
+  resourceType: MedicationDispense
+  id: MedicationDispense ID
+  status: Status
+  medicationCodeableConcept: Medication
+  subject: Subject
+  whenPrepared: When Prepared
+  whenHandedOver: When Handed Over
+  performer: Performer
+  dosageInstruction: Dosage Instruction
+  substitution: Substitution
+Substance:
+  resourceType: Substance
+  id: Substance ID
+  status: Status
+  category: Category
+  code: Code
+  description: Description
+  instance: Instance
+  ingredient: Ingredient
+SpecimenDefinition:
+  resourceType: SpecimenDefinition
+  id: SpecimenDefinition ID
+  identifier: Identifier
+  typeCollected: Type Collected
+  patientPreparation: Patient Preparation
+  timeAspect: Time Aspect
+  collection: Collection
+  typeTested: Type Tested
+AdverseEvent:
+  resourceType: AdverseEvent
+  id: AdverseEvent ID
+  status: Status
+  category: Category
+  event: Event
+  subject: Subject
+  date: Date
+  seriousness: Seriousness
+  severity: Severity
+  outcome: Outcome
+  recorder: Recorder
+BodyStructure:
+  resourceType: BodyStructure
+  id: BodyStructure ID
+  identifier: Identifier
+  active: Active
+  morphology: Morphology
+  location: Location
+  description: Description
+  image: Image
+  patient: Patient
+ChargeItem:
+  resourceType: ChargeItem
+  id: ChargeItem ID
+  status: Status
+  code: Code
+  subject: Subject
+  context: Context
+  occurrenceDateTime: Occurrence Date and Time
+  performer: Performer
+  requestingOrganization: Requesting Organization
+  costCenter: Cost Center
+ChargeItemDefinition:
+  resourceType: ChargeItemDefinition
+  id: ChargeItemDefinition ID
+  url: URL
+  status: Status
+  description: Description
+  effectivePeriod: Effective Period
+  chargeItemCode: Charge Item Code
+  applicability: Applicability
+  propertyGroup: Property Group
+DeviceMetric:
+  resourceType: DeviceMetric
+  id: DeviceMetric ID
+  identifier: Identifier
+  type: Type
+  unit: Unit
+  source: Source
+  parent: Parent
+  operationalStatus: Operational Status
+  color: Color
+  category: Category
+  measurementPeriod: Measurement Period
+DeviceUseStatement:
+  resourceType: DeviceUseStatement
+  id: DeviceUseStatement ID
+  status: Status
+  device: Device
+  subject: Subject
+  recordedOn: Recorded On
+  timing: Timing
+  performer: Performer
+  reasonCode: Reason Code
+CoverageEligibilityRequest:
+  resourceType: CoverageEligibilityRequest
+  id: CoverageEligibilityRequest ID
+  status: Status
+  priority: Priority
+  purpose: Purpose
+  patient: Patient
+  servicedDate: Serviced Date
+  created: Created
+  provider: Provider
+  insurance: Insurance
+  item: Item
+CoverageEligibilityResponse:
+  resourceType: CoverageEligibilityResponse
+  id: CoverageEligibilityResponse ID
+  status: Status
+  purpose: Purpose
+  patient: Patient
+  servicedDate: Serviced Date
+  created: Created
+  requestProvider: Request Provider
+  insurance: Insurance
+  outcome: Outcome
+  disposition: Disposition
+  item: Item
+DetectedIssue:
+  resourceType: DetectedIssue
+  id: DetectedIssue ID
+  status: Status
+  category: Category
+  severity: Severity
+  patient: Patient
+  date: Date
+  author: Author
+  implicated: Implicated
+  detail: Detail
+DeviceDefinition:
+  resourceType: DeviceDefinition
+  id: DeviceDefinition ID
+  identifier: Identifier
+  type: Type
+  manufacturer: Manufacturer
+  deviceName: Device Name
+  modelNumber: Model Number
+  version: Version
+  safety: Safety
+  shelfLifeStorage: Shelf Life Storage
+Evidence:
+  resourceType: Evidence
+  id: Evidence ID
+  url: URL
+  status: Status
+  description: Description
+  topic: Topic
+  contributor: Contributor
+  publisher: Publisher
+  contact: Contact
+  relatedArtifact: Related Artifact
+  exposureBackground: Exposure Background
+EvidenceVariable:
+  resourceType: EvidenceVariable
+  id: EvidenceVariable ID
+  url: URL
+  status: Status
+  description: Description
+  type: Type
+  characteristic: Characteristic
+GuidanceResponse:
+  resourceType: GuidanceResponse
+  id: GuidanceResponse ID
+  requestIdentifier: Request Identifier
+  identifier: Identifier
+  status: Status
+  subject: Subject
+  encounter: Encounter
+  occurrenceDateTime: Occurrence Date and Time
+  performer: Performer
+  reasonCode: Reason Code
+  note: Note
+InsurancePlan:
+  resourceType: InsurancePlan
+  id: InsurancePlan ID
+  identifier: Identifier
+  status: Status
+  type: Type
+  name: Name
+  alias: Alias
+  period: Period
+  ownedBy: Owned By
+  administeredBy: Administered By
+  coverageArea: Coverage Area
+  plan: Plan
+Measure:
+  resourceType: Measure
+  id: Measure ID
+  url: URL
+  identifier: Identifier
+  status: Status
+  title: Title
+  description: Description
+  subject: Subject
+  date: Date
+  publisher: Publisher
+  contact: Contact
+  relatedArtifact: Related Artifact
+  library: Library
+MeasureReport:
+  resourceType: MeasureReport
+  id: MeasureReport ID
+  status: Status
+  type: Type
+  measure: Measure
+  subject: Subject
+  date: Date
+  reporter: Reporter
+  period: Period
+  group: Group
+  evaluatedResource: Evaluated Resource
+MolecularSequence:
+  resourceType: MolecularSequence
+  id: MolecularSequence ID
+  type: Type
+  coordinateSystem: Coordinate System
+  patient: Patient
+  specimen: Specimen
+  device: Device
+  performer: Performer
+  quantity: Quantity
+  referenceSeq: Reference Seq
+  variant: Variant
+  observedSeq: Observed Seq
+  quality: Quality
+  readCoverage: Read Coverage
+NutritionProduct:
+  resourceType: NutritionProduct
+  id: NutritionProduct ID
+  status: Status
+  category: Category
+  code: Code
+  manufacturer: Manufacturer
+  nutrient: Nutrient
+  ingredient: Ingredient
+  knownAllergen: Known Allergen
+  physicalCharacteristics: Physical Characteristics
+  instance: Instance
+  characteristic: Characteristic
+RegulatedAuthorization:
+  resourceType: RegulatedAuthorization
+  id: RegulatedAuthorization ID
+  identifier: Identifier
+  subject: Subject
+  type: Type
+  region: Region
+  status: Status
+  datePeriod: Date Period
+  validityPeriod: Validity Period
+  basis: Basis
+  holder: Holder
+  regulator: Regulator
+  case: Case
+ResearchStudy:
+  resourceType: ResearchStudy
+  id: ResearchStudy ID
+  identifier: Identifier
+  title: Title
+  status: Status
+  primaryPurposeType: Primary Purpose Type
+  phase: Phase
+  category: Category
+  focus: Focus
+  condition: Condition
+  contact: Contact
+  relatedArtifact: Related Artifact
+  keyword: Keyword
+  location: Location
+ResearchSubject:
+  resourceType: ResearchSubject
+  id: ResearchSubject ID
+  identifier: Identifier
+  status: Status
+  period: Period
+  study: Study
+  individual: Individual
+  assignedArm: Assigned Arm
+  actualArm: Actual Arm
+  consent: Consent
+InsurancePlan:
+  resourceType: InsurancePlan
+  id: InsurancePlan ID
+  identifier: Identifier
+  status: Status
+  type: Type
+  name: Name
+  alias: Alias
+  period: Period
+  ownedBy: Owned By
+  administeredBy: Administered By
+  coverageArea: Coverage Area
+  plan: Plan
+Library:
+  resourceType: Library
+  id: Library ID
+  url: URL
+  status: Status
+  title: Title
+  type: Type
+  subject: Subject
+  date: Date
+  publisher: Publisher
+  contact: Contact
+  description: Description
+  jurisdiction: Jurisdiction
+  purpose: Purpose
+  usage: Usage
+  topic: Topic
+  author: Author
+  editor: Editor
+  reviewer: Reviewer
+  endorser: Endorser
+  relatedArtifact: Related Artifact
+  parameter: Parameter
+Linkage:
+  resourceType: Linkage
+  id: Linkage ID
+  active: Active
+  author: Author
+  item: Item
+List:
+  resourceType: List
+  id: List ID
+  status: Status
+  mode: Mode
+  title: Title
+  code: Code
+  subject: Subject
+  encounter: Encounter
+  date: Date
+  source: Source
+  orderedBy: Ordered By
+  emptyReason: Empty Reason
+  entry: Entry
+Location:
+  resourceType: Location
+  id: Location ID
+  identifier: Identifier
+  status: Status
+  name: Name
+  description: Description
+  address: Address
+  physicalType: Physical Type
+ManufacturedItemDefinition:
+  resourceType: ManufacturedItemDefinition
+  id: ManufacturedItemDefinition ID
+  identifier: Identifier
+  status: Status
+  manufacturedDoseForm: Manufactured Dose Form
+  unitOfPresentation: Unit of Presentation
+  manufacturer: Manufacturer
+  ingredient: Ingredient
+  characteristic: Characteristic
+MessageDefinition:
+  resourceType: MessageDefinition
+  id: MessageDefinition ID
+  url: URL
+  status: Status
+  description: Description
+  title: Title
+  date: Date
+  publisher: Publisher
+  eventCoding: Event Coding
+  focus: Focus
+  responseRequired: Response Required
+  allowedResponse: Allowed Response
+MessageHeader:
+  resourceType: MessageHeader
+  id: MessageHeader ID
+  eventCoding: Event Coding
+  destination: Destination
+  sender: Sender
+  source: Source
+  responsible: Responsible
+  reason: Reason
+  response: Response
+ObservationDefinition:
+  resourceType: ObservationDefinition
+  id: ObservationDefinition ID
+  identifier: Identifier
+  status: Status
+  category: Category
+  code: Observation Code
+  permittedDataType: Permitted Data Type
+  multipleResultsAllowed: Multiple Results Allowed
+  method: Method
+  preferredReportName: Preferred Report Name
+  quantitativeDetails: Quantitative Details
+OrganizationAffiliation:
+  resourceType: OrganizationAffiliation
+  id: OrganizationAffiliation ID
+  identifier: Identifier
+  active: Active
+  organization: Organization
+  participatingOrganization: Participating Organization
+  network: Network
+  code: Code
+  specialty: Specialty
+  location: Location
+  healthcareService: Healthcare Service
+  telecom: Telecom
+  endpoint: Endpoint
+PaymentReconciliation:
+  resourceType: PaymentReconciliation
+  id: PaymentReconciliation ID
+  status: Status
+  period: Period
+  created: Created
+  paymentIssuer: Payment Issuer
+  request: Request
+  requestor: Requestor
+  outcome: Outcome
+  disposition: Disposition
+  paymentDate: Payment Date
+  amount: Amount
+PlanDefinition:
+  resourceType: PlanDefinition
+  id: PlanDefinition ID
+  url: URL
+  status: Status
+  type: Type
+  title: Title
+  description: Description
+  subject: Subject
+  date: Date
+  publisher: Publisher
+  goal: Goal
+  action: Action
+PractitionerRole:
+  resourceType: PractitionerRole
+  id: PractitionerRole ID
+  practitioner: Practitioner
+  organization: Organization
+  code: Role Code
+  specialty: Specialty
+  telecom: Telecom
+  period: Period
+  location: Location
+  healthcareService: Healthcare Service
+Questionnaire:
+  resourceType: Questionnaire
+  id: Questionnaire ID
+  url: URL
+  status: Status
+  subjectType: Subject Type
+  date: Date
+  publisher: Publisher
+  purpose: Purpose
+  item: Item
+ActivityDefinition:
+  resourceType: ActivityDefinition
+  id: ActivityDefinition ID
+  url: URL
+  status: Status
+  description: Description
+  purpose: Purpose
+  usage: Usage
+  topic: Topic
+  author: Author
+  editor: Editor
+  reviewer: Reviewer
+  endorser: Endorser
+  relatedArtifact: Related Artifact
+  timing: Timing
+  location: Location
+AppointmentResponse:
+  resourceType: AppointmentResponse
+  id: AppointmentResponse ID
+  appointment: Appointment
+  start: Start Time
+  end: End Time
+  participantType: Participant Type
+  actor: Actor
+  participantStatus: Participant Status
+  comment: Comment
+AuditEvent:
+  resourceType: AuditEvent
+  id: AuditEvent ID
+  type: Type
+  subtype: Subtype
+  action: Action
+  severity: Severity
+  recorded: Recorded
+  outcome: Outcome
+  agent: Agent
+  source: Source
+  entity: Entity
+Basic:
+  resourceType: Basic
+  id: Basic ID
+  code: Code
+  subject: Subject
+  author: Author
+  created: Created
+Binary:
+  resourceType: Binary
+  id: Binary ID
+  contentType: Content Type
+  data: Data
+BiologicallyDerivedProduct:
+  resourceType: BiologicallyDerivedProduct
+  id: BiologicallyDerivedProduct ID
+  identifier: Identifier
+  productCategory: Product Category
+  productCode: Product Code
+  status: Status
+  quantity: Quantity
+  collection: Collection
+  processing: Processing
+  manipulation: Manipulation
+  storage: Storage
+Bundle:
+  resourceType: Bundle
+  id: Bundle ID
+  type: Type
+  timestamp: Timestamp
+  total: Total
+  link: Link
+  entry: Entry
+  signature: Signature
+CapabilityStatement:
+  resourceType: CapabilityStatement
+  id: CapabilityStatement ID
+  url: URL
+  version: Version
+  name: Name
+  title: Title
+  status: Status
+  experimental: Experimental
+  date: Date
+  publisher: Publisher
+  contact: Contact
+  description: Description
+  jurisdiction: Jurisdiction
+  purpose: Purpose
+  software: Software
+  implementation: Implementation
+  fhirVersion: FHIR Version
+  format: Format
+  rest: Rest
+CatalogEntry:
+  resourceType: CatalogEntry
+  id: CatalogEntry ID
+  identifier: Identifier
+  type: Type
+  orderable: Orderable
+  referencedItem: Referenced Item
+  validityPeriod: Validity Period
+  additionalIdentifier: Additional Identifier
+  relatedEntry: Related Entry
+CodeSystem:
+  resourceType: CodeSystem
+  id: CodeSystem ID
+  url: URL
+  version: Version
+  name: Name
+  title: Title
+  status: Status
+  experimental: Experimental
+  date: Date
+  publisher: Publisher
+  contact: Contact
+  description: Description
+  jurisdiction: Jurisdiction
+  purpose: Purpose
+  content: Content
+  supplements: Supplements
+  concept: Concept
+CompartmentDefinition:
+  resourceType: CompartmentDefinition
+  id: CompartmentDefinition ID
+  url: URL
+  version: Version
+  name: Name
+  title: Title
+  status: Status
+  experimental: Experimental
+  date: Date
+  publisher: Publisher
+  contact: Contact
+  description: Description
+  jurisdiction: Jurisdiction
+  purpose: Purpose
+  code: Code
+  search: Search
+  resource: Resource
+Composition:
+  resourceType: Composition
+  id: Composition ID
+  status: Status
+  type: Type
+  category: Category
+  subject: Subject
+  encounter: Encounter
+  date: Date
+  author: Author
+  title: Title
+  confidentiality: Confidentiality
+  attester: Attester
+  custodian: Custodian
+  relatesTo: Relates To
+  event: Event
+  section: Section
+ConceptMap:
+  resourceType: ConceptMap
+  id: ConceptMap ID
+  url: URL
+  identifier: Identifier
+  version: Version
+  name: Name
+  title: Title
+  status: Status
+  experimental: Experimental
+  date: Date
+  publisher: Publisher
+  contact: Contact
+  description: Description
+  jurisdiction: Jurisdiction
+  purpose: Purpose
+  group: Group
+Contract:
+  resourceType: Contract
+  id: Contract ID
+  url: URL
+  identifier: Identifier
+  status: Status
+  legalState: Legal State
+  issued: Issued
+  applies: Applies
+  subject: Subject
+  authority: Authority
+  domain: Domain
+  site: Site
+  name: Name
+  title: Title
+  subtitle: Subtitle
+  alias: Alias
+  author: Author
+  scope: Scope
+  topicCodeableConcept: Topic
+  type: Type
+  subType: Sub Type
+  contentDefinition: Content Definition
+  term: Term
+  supportingInfo: Supporting Info
+  relevantHistory: Relevant History
+  friendly: Friendly
+  legal: Legal
+  rule: Rule
+DocumentManifest:
+  resourceType: DocumentManifest
+  id: DocumentManifest ID
+  identifier: Identifier
+  status: Status
+  type: Type
+  subject: Subject
+  created: Created
+  author: Author
+  recipient: Recipient
+  source: Source
+  description: Description
+  content: Content
+  related: Related
+DocumentReference:
+  resourceType: DocumentReference
+  id: DocumentReference ID
+  status: Status
+  docStatus: Document Status
+  type: Type
+  category: Category
+  subject: Subject
+  date: Date
+  author: Author
+  custodian: Custodian
+  content: Content
+  context: Context
+EffectEvidenceSynthesis:
+  resourceType: EffectEvidenceSynthesis
+  id: EffectEvidenceSynthesis ID
+  url: URL
+  status: Status
+  description: Description
+  population: Population
+  exposure: Exposure
+  outcome: Outcome
+  synthesisType: Synthesis Type
+  studyType: Study Type
+  resultsByExposure: Results by Exposure
+  effectEstimate: Effect Estimate
+  certainty: Certainty
+Encounter:
+  resourceType: Encounter
+  id: Encounter ID
+  status: Status
+  class: Class
+  type: Encounter Type
+  subject: Subject
+  participant: Participant
+  period: Period
+  reasonCode: Reason Code
+  diagnosis: Diagnosis
+  location: Location
+Endpoint:
+  resourceType: Endpoint
+  id: Endpoint ID
+  status: Status
+  connectionType: Connection Type
+  name: Name
+  managingOrganization: Managing Organization
+  contact: Contact
+  payloadType: Payload Type
+  payloadMimeType: Payload Mime Type
+  address: Address
+  header: Header
+EnrollmentRequest:
+  resourceType: EnrollmentRequest
+  id: EnrollmentRequest ID
+  status: Status
+  created: Created
+  insurer: Insurer
+  provider: Provider
+  candidate: Candidate
+  coverage: Coverage
+EnrollmentResponse:
+  resourceType: EnrollmentResponse
+  id: EnrollmentResponse ID
+  status: Status
+  created: Created
+  organization: Organization
+  request: Request
+  outcome: Outcome
+  disposition: Disposition
+EpisodeOfCare:
+  resourceType: EpisodeOfCare
+  id: EpisodeOfCare ID
+  status: Status
+  type: Type
+  patient: Patient
+  managingOrganization: Managing Organization
+  period: Period
+  referralRequest: Referral Request
+  careManager: Care Manager
+  team: Team
+  diagnosis: Diagnosis
+EventDefinition:
+  resourceType: EventDefinition
+  id: EventDefinition ID
+  url: URL
+  status: Status
+  description: Description
+  trigger: Trigger
+EvidenceVariable:
+  resourceType: EvidenceVariable
+  id: EvidenceVariable ID
+  url: URL
+  status: Status
+  description: Description
+  type: Type
+  characteristic: Characteristic
+FamilyMemberHistory:
+  resourceType: FamilyMemberHistory
+  id: FamilyMemberHistory ID
+  status: Status
+  patient: Patient
+  date: Date
+  relationship: Relationship
+  condition: Condition
+Flag:
+  resourceType: Flag
+  id: Flag ID
+  status: Status
+  category: Category
+  code: Code
+  subject: Subject
+  period: Period
+  encounter: Encounter
+  author: Author
+Goal:
+  resourceType: Goal
+  id: Goal ID
+  lifecycleStatus: Lifecycle Status
+  achievementStatus: Achievement Status
+  category: Category
+  description: Description
+  subject: Subject
+  startDate: Start Date
+  target: Target
+GraphDefinition:
+  resourceType: GraphDefinition
+  id: GraphDefinition ID
+  url: URL
+  status: Status
+  description: Description
+  link: Link
+Group:
+  resourceType: Group
+  id: Group ID
+  identifier: Identifier
+  type: Type
+  actual: Actual
+  code: Code
+  name: Name
+  quantity: Quantity
+  characteristic: Characteristic
+  member: Member
+GuidanceResponse:
+  resourceType: GuidanceResponse
+  id: GuidanceResponse ID
+  requestIdentifier: Request Identifier
+  identifier: Identifier
+  status: Status
+  subject: Subject
+  encounter: Encounter
+  occurrenceDateTime: Occurrence Date and Time
+  performer: Performer
+  reasonCode: Reason Code
+  note: Note

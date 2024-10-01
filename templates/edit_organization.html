@@ -1,0 +1,142 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ organization.name }} - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="edit-organization-container">
+        <div class="edit-organization-header">
+            <h1>Edit {{ organization.name }}</h1>
+        </div>
+
+        <div class="breadcrumb">
+            <a href="{{ url_for('accounts.organizations') }}">Accounts</a> /
+            <a href="{{ url_for('accounts.organizations') }}">Organisations</a> /
+            <a href="{{ url_for('organizations.organization_detail', uuid=organization.uuid) }}">{{ organization.name }}</a>
+            / Edit
+        </div>
+
+        <form method="POST" action="{{ url_for('organizations.edit_organization', uuid=organization.uuid) }}">
+            {{ form.csrf_token }}
+            
+            <div class="form-group">
+                {{ form.name.label }}
+                {{ form.name(class="form-control") }}
+                <span id="name-error" class="error-message">{{ form.name.errors[0] if form.name.errors else '' }}</span>
+            </div>
+
+            <div class="form-group">
+                {{ form.type.label }}
+                {{ form.type(class="form-control") }}
+                <span id="type-error" class="error-message">{{ form.type.errors[0] if form.type.errors else '' }}</span>
+            </div>
+
+            <div class="form-group">
+                {{ form.website.label }}
+                {{ form.website(class="form-control") }}
+                <span id="website-error" class="error-message">{{ form.website.errors[0] if form.website.errors else '' }}</span>
+            </div>
+
+            <div class="form-group">
+                {{ form.email.label }}
+                {{ form.email(class="form-control") }}
+                <span id="email-error" class="error-message">{{ form.email.errors[0] if form.email.errors else '' }}</span>
+            </div>
+
+            <div class="form-group">
+                {{ form.address_line1.label }}
+                {{ form.address_line1(class="form-control") }}
+                <span id="address_line1-error" class="error-message">{{ form.address_line1.errors[0] if form.address_line1.errors else '' }}</span>
+            </div>
+
+            <div class="form-group">
+                {{ form.address_line2.label }}
+                {{ form.address_line2(class="form-control") }}
+                <span id="address_line2-error" class="error-message">{{ form.address_line2.errors[0] if form.address_line2.errors else '' }}</span>
+            </div>
+
+            <div class="form-group">
+                {{ form.zip_code.label }}
+                {{ form.zip_code(class="form-control") }}
+                <span id="zip_code-error" class="error-message">{{ form.zip_code.errors[0] if form.zip_code.errors else '' }}</span>
+            </div>
+
+            <div class="form-group">
+                {{ form.country.label }}
+                {{ form.country(class="form-control") }}
+                <span id="country-error" class="error-message">{{ form.country.errors[0] if form.country.errors else '' }}</span>
+            </div>
+
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+                <a href="{{ url_for('organizations.organization_detail', uuid=organization.uuid) }}" class="btn btn-secondary">Cancel</a>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function validateForm() {
+    let isValid = true;
+    const nameInput = document.getElementById('name');
+    const typeInput = document.getElementById('type');
+    const websiteInput = document.getElementById('website');
+    const emailInput = document.getElementById('email');
+    const zipCodeInput = document.getElementById('zip_code');
+
+    // Reset error messages
+    document.querySelectorAll('.error-message').forEach(el => el.textContent = '');
+
+    // Validate Name (required, min length 2)
+    if (nameInput.value.trim().length < 2) {
+        document.getElementById('name-error').textContent = 'Name must be at least 2 characters long';
+        isValid = false;
+    }
+
+    // Validate Type (required)
+    if (typeInput.value.trim() === '') {
+        document.getElementById('type-error').textContent = 'Type is required';
+        isValid = false;
+    }
+
+    // Validate Website (if provided, must be a valid URL)
+    if (websiteInput.value.trim() !== '' && !isValidUrl(websiteInput.value)) {
+        document.getElementById('website-error').textContent = 'Please enter a valid URL';
+        isValid = false;
+    }
+
+    // Validate Email (if provided, must be a valid email)
+    if (emailInput.value.trim() !== '' && !isValidEmail(emailInput.value)) {
+        document.getElementById('email-error').textContent = 'Please enter a valid email address';
+        isValid = false;
+    }
+
+    // Validate ZIP Code (if provided, must be alphanumeric)
+    if (zipCodeInput.value.trim() !== '' && !isValidZipCode(zipCodeInput.value)) {
+        document.getElementById('zip_code-error').textContent = 'Please enter a valid ZIP code';
+        isValid = false;
+    }
+
+    return isValid;
+}
+
+function isValidUrl(url) {
+    try {
+        new URL(url);
+        return true;
+    } catch (_) {
+        return false;
+    }
+}
+
+function isValidEmail(email) {
+    const re = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)*$/;
+    return re.test(email.toLowerCase());
+}
+
+function isValidZipCode(zipCode) {
+    const re = /^[a-zA-Z0-9\s-]+$/;
+    return re.test(zipCode);
+}
+</script>
+{% endblock %}

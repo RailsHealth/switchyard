@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Create New Stream - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="create-stream-container">
+        <div class="create-stream-header">
+            <h1>Create New Stream</h1>
+            <p>Configure the parameters to begin for {{ g.organization['name'] }}.</p>
+        </div>
+
+        <div class="breadcrumb">
+            <a href="{{ url_for('streams.view_streams') }}">Input Streams</a> /
+            Create Stream
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="create-stream-form">
+                <h2>Select Message Type</h2>
+                <form method="POST" action="{{ url_for('streams.create_stream') }}">
+                    {{ form.csrf_token }}
+                    <div class="type-form-group">
+                        <div class="type-grid">
+                            {% for message_type in ['HL7v2', 'FHIR Test Server', 'CCDA (SFTP)', 'X12 (SFTP)', 'Clinical Notes (SFTP)'] %}
+                                <div class="type-option">
+                                    <input type="radio" id="{{ message_type }}" name="message_type" value="{{ message_type }}">
+                                    <label for="{{ message_type }}">{{ message_type }}</label>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Next</button>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="error-message">
+                You do not have permission to create a new stream. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const form = document.querySelector('form');
+        const submitButton = form.querySelector('button[type="submit"]');
+
+        form.addEventListener('submit', function(e) {
+            if (!form.querySelector('input[name="message_type"]:checked')) {
+                e.preventDefault();
+                alert('Please select a message type before proceeding.');
+            }
+        });
+
+        form.querySelectorAll('input[name="message_type"]').forEach(function(radio) {
+            radio.addEventListener('change', function() {
+                submitButton.disabled = false;
+            });
+        });
+
+        // Initially disable the submit button
+        submitButton.disabled = true;
+    });
+</script>
+{% endblock %}

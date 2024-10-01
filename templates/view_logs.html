@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Logs - Rails Health Interface{% endblock %}
+{% block content %}
+
+<div class="main-content">
+    <div class="view-logs-container">
+        <div class="view-logs-header">
+            <h1>Logs</h1>
+            <p>View logs for {{ g.organization['name'] }}</p>
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="logs-actions">
+                <div class="filters-and-pagination">
+                    <div class="filter-by">
+                        <label for="stream-filter">Filter by Stream:</label>
+                        <select id="stream-filter">
+                            <option value="">All Streams</option>
+                            {% for stream in streams %}
+                                <option value="{{ stream.uuid }}" {% if selected_stream_uuid == stream.uuid %}selected{% endif %}>{{ stream.name }}</option>
+                            {% endfor %}
+                        </select>
+
+                        <label for="type-filter">Filter by Type:</label>
+                        <select id="type-filter">
+                            <option value="all" {% if log_type == 'all' %}selected{% endif %}>All Types</option>
+                            {% for type in log_types %}
+                                <option value="{{ type }}" {% if log_type == type %}selected{% endif %}>{{ type }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    {% if total_pages > 0 %}
+                        <div class="pagination">
+                            <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+                            {% if page > 1 %}
+                                <a href="{{ url_for('logs.view_logs', page=page-1, stream_uuid=selected_stream_uuid, type=log_type) }}" class="page-link">Previous</a>
+                            {% endif %}
+                            {% if page < total_pages %}
+                                <a href="{{ url_for('logs.view_logs', page=page+1, stream_uuid=selected_stream_uuid, type=log_type) }}" class="page-link">Next</a>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div id="logs-list">
+                {% if grouped_logs %}
+                    {% for date, logs in grouped_logs.items() %}
+                        <h2 id="{{ date }}" class="date-header" utc-date="{{ date }}">{{ date }}</h2>
+                        <div class="log-group">
+                            {% for log in logs %}
+                                <div class="card log-card {% if log.stream_deleted %}deleted{% endif %}">
+                                    <div class="card-header">
+                                        <span class="log-time" utc-time="{{ log.timestamp.isoformat() }}">{{ log.timestamp.strftime('%I:%M:%S %p') }}</span>
+                                        <span class="log-stream">{{ log.stream_name }}</span>
+                                        <span class="log-type">Type: {{ log.message_type }}</span>
+                                        <span class="log-category">Category: {{ log.log_type }}</span>
+                                    </div>
+                                    <div class="card-body">
+                                        <pre class="log-content">{{ log.message }}</pre>
+                                        {% if log.log_type == 'Parsing' %}
+                                            <div class="parsing-details">
+                                                <p>Event: {{ log.event }}</p>
+                                                {% if log.event == 'type_mismatch' %}
+                                                    <p>Initial Type: {{ log.initial_type }}</p>
+                                                    <p>Detected Type: {{ log.detected_type }}</p>
+                                                    <p>Confidence: {{ log.confidence }}</p>
+                                                {% endif %}
+                                            </div>
+                                        {% elif log.log_type == 'Validation' %}
+                                            <div class="validation-details">
+                                                <p>Is Valid: {{ log.is_valid }}</p>
+                                                <p>Validation Message: {{ log.validation_message }}</p>
+                                            </div>
+                                        {% endif %}
+                                    </div>
+                                </div>
+                            {% endfor %}
+                        </div>
+                    {% endfor %}
+                {% else %}
+                    <div id="empty-state" class="alert alert-info">
+                        No logs at this point. Logs will appear here once generated.
+                    </div>
+                {% endif %}
+            </div>
+
+            {% if total_pages > 1 %}
+                <div class="pagination">
+                    <a href="{{ url_for('logs.view_logs', page=page-1, stream_uuid=selected_stream_uuid, type=log_type) }}" class="page-link {% if page == 1 %}disabled{% endif %}">Previous</a>
+                    <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+                    <a href="{{ url_for('logs.view_logs', page=page+1, stream_uuid=selected_stream_uuid, type=log_type) }}" class="page-link {% if page == total_pages %}disabled{% endif %}">Next</a>
+                </div>
+            {% endif %}
+        {% else %}
+            <div class="error-message">
+                <p>You do not have permission to view logs. Please contact an administrator.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const organizationSelect = document.getElementById('organization-select');
+    const streamFilter = document.getElementById('stream-filter');
+    const typeFilter = document.getElementById('type-filter');
+
+    function changeOrganization(orgUuid) {
+        window.location.href = "{{ url_for('logs.view_logs') }}?organization_uuid=" + orgUuid;
+    }
+
+    function updateFilters() {
+        const orgUuid = organizationSelect.value;
+        const streamUuid = streamFilter.value;
+        const messageType = typeFilter.value;
+        window.location.href = "{{ url_for('logs.view_logs') }}?organization_uuid=" + orgUuid + "&stream_uuid=" + streamUuid + "&type=" + messageType;
+    }
+
+    organizationSelect.addEventListener('change', function() {
+        changeOrganization(this.value);
+    });
+    streamFilter.addEventListener('change', updateFilters);
+    typeFilter.addEventListener('change', updateFilters);
+
+    // Convert UTC times to local timezone for individual logs
+    document.querySelectorAll('.log-time').forEach(timeElement => {
+        const utcTime = timeElement.getAttribute('data-utc-time');
+        const localTime = moment.utc(utcTime).local().format('DD MMM YYYY, hh:mm:ssA');
+        timeElement.textContent = localTime;
+    });
+    
+    document.querySelectorAll('.date-header').forEach(header => {
+        const dateStr = header.getAttribute('data-utc-date');
+        const localDate = moment.utc(dateStr).local();
+
+        if (localDate.isValid()) {
+            const today = moment().startOf('day');
+            const yesterday = moment().subtract(1, 'days').startOf('day');
+
+            if (localDate.isSame(today, 'day')) {
+                header.textContent = 'Today';
+            } else if (localDate.isSame(yesterday, 'day')) {
+                header.textContent = 'Yesterday';
+            } else {
+                header.textContent = localDate.format('Do MMM YYYY');
+            }
+        } else {
+            header.textContent = dateStr; // Fallback to original string if parsing fails
+        }
+    });
+});
+
+function getOrdinalSuffix(day) {
+    if (day > 3 && day < 21) return 'th';
+    switch (day % 10) {
+        case 1:  return "st";
+        case 2:  return "nd";
+        case 3:  return "rd";
+        default: return "th";
+    }
+}
+</script>
+{% endblock %}

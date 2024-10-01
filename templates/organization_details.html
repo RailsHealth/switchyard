@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ organization.name }} - Rails Health Interface{% endblock %}
+{% block content %}
+
+<div class="main-content">
+    <div class="organization-details-container">
+        <div class="organization-details-header">
+            <h1>{{ organization.name }}</h1>
+            <p>Edit Organisation</p>
+        </div>
+
+        <div class="breadcrumb">
+            <a href="{{ url_for('accounts.organizations') }}">Accounts</a> / <a href="{{ url_for('accounts.organizations') }}">Organisations</a> / {{ organization.name }}
+        </div>
+
+        <div class="organization-info">
+            <div class="info-row">
+                <span class="info-label">Name:</span>
+                <span class="info-value">{{ organization.name }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Type:</span>
+                <span class="info-value">{{ organization.type }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Created at:</span>
+                <span class="info-value">{{ organization.created_at.strftime('%d %b %Y, %I:%M %p') }} (local timezone)</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Your Role:</span>
+                <span class="info-value">{{ user_role }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Website:</span>
+                <span class="info-value">{{ organization.website or 'Not Available' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Contact Email:</span>
+                <span class="info-value">{{ organization.email or 'Not Available' }}</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Address:</span>
+                <span class="info-value">{{ organization.address.get('line1', '') }} {{ organization.address.get('line2', '') }}, {{ organization.address.get('city', '') }}, {{ organization.address.get('country', '') }} {{ organization.address.get('zip_code', '') }}</span>
+            </div>
+        </div>
+
+        <div class="organization-actions">
+            {% if user_role == 'admin' %}
+                <a href="{{ url_for('organizations.edit_organization', uuid=organization.uuid) }}" class="btn btn-primary">Edit</a>
+                <button id="delete-org-btn" class="btn btn-danger">Delete Organisation</button>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('delete-org-btn').addEventListener('click', function() {
+    if (confirm('Are you sure you want to delete this organization? All data associated with this organization will be deleted from our system. This action cannot be undone.')) {
+        fetch("{{ url_for('organizations.delete_organization', uuid=organization.uuid) }}", {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            },
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                window.location.href = "{{ url_for('accounts.organizations') }}";
+            } else {
+                alert('Error: ' + data.message);
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while deleting the organization.');
+        });
+    }
+});
+</script>
+{% endblock %}

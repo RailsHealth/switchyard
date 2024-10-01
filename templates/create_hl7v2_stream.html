@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Create HL7v2 Stream - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="create-stream-container">
+        <div class="create-stream-header">
+            <h1>Create New HL7v2 Stream</h1>
+            <p>Configure the parameters to begin for {{ g.organization['name'] }}.</p>
+        </div>
+
+        <div class="breadcrumb">
+            <a href="{{ url_for('streams.view_streams') }}">Input Streams</a> /
+            <a href="{{ url_for('streams.create_stream') }}">Create Stream</a> /
+            HL7v2
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="create-stream-form">
+                <h2>HL7v2: Configure Listener Details for MLLP</h2>
+
+                <form method="POST" action="{{ url_for('streams.create_hl7v2_stream') }}">
+                    {{ form.hidden_tag() }}
+
+                    <div class="form-group">
+                        {{ form.name.label }}
+                        {{ form.name(class="form-control") }}
+                    </div>
+
+                    <div class="form-group">
+                        {{ form.host.label }}
+                        {{ form.host(class="form-control") }}
+                    </div>
+
+                    <div class="form-group">
+                        {{ form.port.label }}
+                        {{ form.port(class="form-control") }}
+                    </div>
+
+                    <div class="form-group">
+                        {{ form.timeout.label }}
+                        {{ form.timeout(class="form-control") }}
+                    </div>
+
+                    <div id="error-messages" class="error-messages">
+                        {% with messages = get_flashed_messages(with_categories=true) %}
+                            {% if messages %}
+                                {% for category, message in messages %}
+                                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                                {% endfor %}
+                            {% endif %}
+                        {% endwith %}
+                    </div>
+
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn-primary">Save</button>
+                        <a href="{{ url_for('streams.view_streams') }}" class="btn btn-secondary">Cancel</a>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="error-message">
+                You do not have permission to create a new HL7v2 stream. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('hl7v2-form');
+    const errorMessages = document.getElementById('error-messages');
+
+    form.addEventListener('submit', function(event) {
+        let isValid = true;
+        errorMessages.innerHTML = '';
+
+        // Validate Name
+        const name = document.getElementById('name');
+        if (name.value.trim() === '') {
+            isValid = false;
+            errorMessages.innerHTML += '<div class="alert alert-danger">Name is required.</div>';
+        }
+
+        // Validate Host
+        const host = document.getElementById('host');
+        if (host.value.trim() === '') {
+            isValid = false;
+            errorMessages.innerHTML += '<div class="alert alert-danger">Host is required.</div>';
+        }
+
+        // Validate Port
+        const port = document.getElementById('port');
+        if (port.value.trim() === '' || isNaN(port.value) || port.value < 1 || port.value > 65535) {
+            isValid = false;
+            errorMessages.innerHTML += '<div class="alert alert-danger">Port must be a number between 1 and 65535.</div>';
+        }
+
+        // Validate Timeout
+        const timeout = document.getElementById('timeout');
+        if (timeout.value.trim() === '' || isNaN(timeout.value) || timeout.value < 1) {
+            isValid = false;
+            errorMessages.innerHTML += '<div class="alert alert-danger">Timeout must be a positive number.</div>';
+        }
+
+        if (!isValid) {
+            event.preventDefault();
+        }
+    });
+});
+</script>
+{% endblock %}

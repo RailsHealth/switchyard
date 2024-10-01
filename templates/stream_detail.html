@@ -1,0 +1,145 @@
+{% extends "base.html" %}
+{% block title %}View Stream - {{ stream.name }}{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="stream-detail-container">
+        <div class="stream-detail-header">
+            <h1>View Stream</h1>
+            <p>View and manage configured streams for {{ g.organization['name'] }}</p>
+        </div>
+
+        <div class="breadcrumb">
+            <a href="{{ url_for('streams.view_streams') }}">Input Streams</a> /
+            <a href="{{ url_for('streams.view_streams') }}">View Streams</a> /
+            {{ stream.name }}
+        </div>
+
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        <div class="stream-detail" data-stream-id="{{ stream.uuid }}">
+            <div class="stream-info">
+                <div class="stream-info-row">
+                    <span class="info-label">Name:</span>
+                    <span class="info-value">{{ stream.name }}</span>
+                </div>
+                <div class="stream-info-row">
+                    <span class="info-label">Created at:</span>
+                    <span class="info-value">{{ stream.created_at.strftime('%d %b %Y, %I:%M %p') }} (local timezone)</span>
+                </div>
+                <div class="stream-info-row">
+                    <span class="info-label">Type:</span>
+                    <span class="info-value">{{ stream.message_type }}</span>
+                </div>
+                {% if stream.message_type == 'HL7v2' %}
+                    <div class="stream-info-row">
+                        <span class="info-label">Host:</span>
+                        <span class="info-value">{{ stream.host }}</span>
+                    </div>
+                    <div class="stream-info-row">
+                        <span class="info-label">Port:</span>
+                        <span class="info-value">{{ stream.port }}</span>
+                    </div>
+                    <div class="stream-info-row">
+                        <span class="info-label">Timeout:</span>
+                        <span class="info-value">{{ stream.timeout }}</span>
+                    </div>
+                {% elif stream.message_type == 'FHIR' %}
+                    <div class="stream-info-row">
+                        <span class="info-label">URL:</span>
+                        <span class="info-value">{{ stream.url }}</span>
+                    </div>
+                    <div class="stream-info-row">
+                        <span class="info-label">FHIR Version:</span>
+                        <span class="info-value">{{ stream.fhir_version }}</span>
+                    </div>
+                {% endif %}
+            </div>
+
+            <div class="stream-actions">
+                {% if g.user_role == 'admin' %}
+                    {% if stream.message_type == 'HL7v2' %}
+                        <a href="{{ url_for('streams.edit_stream', uuid=stream.uuid) }}" class="btn btn-secondary">Edit</a>
+                    {% endif %}
+                    <form id="delete-form" method="POST" action="{{ url_for('streams.delete_stream', uuid=stream.uuid) }}">
+                        {{ form.csrf_token }}
+                        <button type="submit" class="btn btn-danger" id="delete-btn">Delete</button>
+                    </form>
+                    {% if stream.active %}
+                        <button class="btn btn-warning stream-action-btn" data-action="stop">Stop Listening</button>
+                    {% else %}
+                        <button class="btn btn-success stream-action-btn" data-action="start">Start Listening</button>
+                    {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const csrfToken = "{{ csrf_token() }}";
+        const streamId = document.querySelector('.stream-detail').getAttribute('data-stream-id');
+
+        // Delete stream functionality
+        const deleteForm = document.getElementById('delete-form');
+        const deleteBtn = document.getElementById('delete-btn');
+        
+        if (deleteForm && deleteBtn) {
+            deleteBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                if (confirm('Are you sure you want to delete this stream?')) {
+                    deleteForm.submit();
+                }
+            });
+        }
+
+        // Start/Stop stream functionality
+        const actionBtn = document.querySelector('.stream-action-btn');
+        if (actionBtn) {
+            actionBtn.addEventListener('click', function(e) {
+                e.preventDefault();
+                const action = this.getAttribute('data-action');
+                const originalText = this.textContent;
+                
+                // Set button state to 'processing'
+                this.textContent = action === 'start' ? 'Starting...' : 'Stopping...';
+                this.disabled = true;
+
+                fetch(`/streams/${streamId}/${action}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-CSRFToken': csrfToken
+                    },
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.status === 'success') {
+                        location.reload();
+                    } else {
+                        alert(`Error ${action}ing stream: ` + data.message);
+                        // Reset button state
+                        this.textContent = originalText;
+                        this.disabled = false;
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    alert(`An error occurred while ${action}ing the stream.`);
+                    // Reset button state
+                    this.textContent = originalText;
+                    this.disabled = false;
+                });
+            });
+        }
+    });
+</script>
+{% endblock %}
