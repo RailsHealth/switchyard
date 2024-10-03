@@ -41,6 +41,7 @@ instance/
 # Operating Systems
 .DS_Store
 Thumbs.db
+**/.DS_Store
 
 # Logs
 *.log
