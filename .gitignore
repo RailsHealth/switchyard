@@ -1,12 +1,13 @@
-# Byte-compiled / optimized / DLL files
-__pycache__/
+# Virtual Environment
+R5/
+venv/
+env/
+ENV/
+
+# Python
 *.py[cod]
-*$py.class
-
-# C extensions
+__pycache__/
 *.so
-
-# Distribution / packaging
 .Python
 build/
 develop-eggs/
@@ -24,16 +25,37 @@ wheels/
 .installed.cfg
 *.egg
 
-# PyInstaller
-*.manifest
-*.spec
+# Flask
+instance/
+.webassets-cache
 
-# Installer logs
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Operating Systems
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Database
+*.sqlite
+
+# Environment variables
+.env
+
+# Package management
 pip-log.txt
 pip-delete-this-directory.txt
 
-# Unit test / coverage reports
-htmlcov/
+# Testing
 .tox/
 .coverage
 .coverage.*
@@ -47,15 +69,17 @@ coverage.xml
 *.mo
 *.pot
 
-# Django stuff:
+# Django
 *.log
 local_settings.py
+db.sqlite3
+db.sqlite3-journal
 
-# Flask stuff:
+# Flask
 instance/
 .webassets-cache
 
-# Scrapy stuff:
+# Scrapy
 .scrapy
 
 # Sphinx documentation
@@ -66,6 +90,10 @@ target/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
 
 # pyenv
 .python-version
@@ -82,7 +110,8 @@ celerybeat-schedule
 env/
 venv/
 ENV/
-R5/  # Add this line to exclude your specific virtual environment
+env.bak/
+venv.bak/
 
 # Spyder project settings
 .spyderproject
@@ -96,33 +125,16 @@ R5/  # Add this line to exclude your specific virtual environment
 
 # mypy
 .mypy_cache/
+.dmypy.json
+dmypy.json
 
-# IDE settings
-.vscode/
-.idea/
+# Pyre type checker
+.pyre/
 
-__pycache__/
-*.pyc
-*.pyo
-*.pyd
+# pytype static type analyzer
+.pytype/
 
-*.py[cod]
-*$py.class
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# Cython debug symbols
+cython_debug/
 
-.DS_Store
+# Custom - add any project-specific files or directories here
