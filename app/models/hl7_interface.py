@@ -10,6 +10,7 @@ import logging
 import uuid
 import json
 
+
 class HL7v2Interface:
     def __init__(self, stream_uuid, host, port, timeout=60, organization_uuid=None):
         self.stream_uuid = stream_uuid

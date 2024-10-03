@@ -10,7 +10,7 @@ from app.middleware import set_user_and_org_context, get_user_organizations, set
 from app.services.fhir_validator import init_fhir_validator
 from app.auth import init_oauth
 from flask_wtf.csrf import CSRFProtect
-from app.services.health_data_converter import init_conversion_scheduler
+from app.services.health_data_converter import init_health_data_converter, scheduled_process_pending_conversions
 
 
 csrf = CSRFProtect()
@@ -39,6 +39,9 @@ def create_app(config_class=Config):
 
     # Initialize FHIRValidator
     init_fhir_validator(app)
+
+    # Initialize the conversion scheduler
+    init_health_data_converter(app, mongo)
 
     # Register blueprints
     from app.routes import main, streams, messages, logs, organizations, accounts
@@ -143,7 +146,12 @@ def schedule_tasks(app):
                     app.logger.info(f"Fetching data for FHIR stream: {stream_uuid}")
                     interface.fetch_data()
             app.logger.info("Completed scheduled FHIR data fetch")
-
+    
+    @scheduler.task('interval', id='process_pending_conversions', seconds=60, misfire_grace_time=300)
+    def process_pending_conversions_task():
+        with app.app_context():
+            scheduled_process_pending_conversions(app, mongo)
+    
     @scheduler.task('interval', id='parse_files', seconds=30, misfire_grace_time=300)
     def parse_files():
         with app.app_context():

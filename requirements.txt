@@ -102,3 +102,7 @@ Faker==18.10.1
 pyccda==1.1.1
 pyx12==2.3.5
 lxml==4.9.2
+
+Flask-Admin==1.6.1
+
+tenacity
