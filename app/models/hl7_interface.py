@@ -9,7 +9,8 @@ from datetime import datetime
 import logging
 import uuid
 import json
-
+from flask import current_app
+from app.tasks import hl7v2_to_fhir_conversion
 
 class HL7v2Interface:
     def __init__(self, stream_uuid, host, port, timeout=60, organization_uuid=None):
@@ -40,19 +41,40 @@ class HL7v2Interface:
             "parsed": parsed,
             "timestamp": datetime.utcnow(),
             "type": "HL7v2",
-            "conversion_status": "pending"
+            "conversion_status": "pending",
+            "retry_count": 0
         }
         try:
             self.logger.debug(f"Attempting to store message: {message_dict['uuid']}")
             result = self.messages_collection.insert_one(message_dict)
+            
             if result.acknowledged:
-                self.logger.info(f"Message stored successfully: {message_dict['uuid']} (Parsed: {parsed}, Type: HL7v2)")
-                self.logger.debug(f"Stored message details: {message_dict}")
+                message_id = str(result.inserted_id)
+                self.logger.info(f"Message stored successfully: {message_id}")
+                
+                # Queue the message for conversion
+                try:
+                    self._queue_message_for_conversion(message_id)
+                    self.logger.info(f"Message queued for conversion: {message_id}")
+                except Exception as queue_error:
+                    self.logger.error(f"Failed to queue message {message_id} for conversion: {str(queue_error)}")
+                    self.messages_collection.update_one(
+                        {"_id": result.inserted_id},
+                        {"$set": {"conversion_status": "queue_failed"}}
+                    )
             else:
                 self.logger.error(f"Failed to store message in MongoDB: {message_dict['uuid']}")
         except Exception as e:
-            self.logger.error(f"Error storing message in MongoDB: {e}")
+            self.logger.error(f"Error storing message in MongoDB: {str(e)}")
             self.logger.debug(f"Message that failed to store: {message_dict}")
+
+    def _queue_message_for_conversion(self, message_id):
+        try:
+            task = hl7v2_to_fhir_conversion.apply_async(args=[message_id], queue='hl7v2_conversion')
+            self.logger.info(f"Successfully queued message {message_id} for conversion. Task ID: {task.id}")
+        except Exception as e:
+            self.logger.error(f"Failed to queue message {message_id} for conversion: {str(e)}")
+            raise
 
     def _store_log(self, level, message):
         log_entry = {

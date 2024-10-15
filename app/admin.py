@@ -2,7 +2,6 @@ from flask_admin import Admin
 from flask_admin.contrib.pymongo import ModelView
 from wtforms import Form, StringField, IntegerField, BooleanField, DateTimeField, TextAreaField, FloatField
 from wtforms.validators import Optional
-from flask_admin.model.template import BaseListRowAction
 from flask_admin.contrib.pymongo.filters import FilterEqual, FilterLike
 import json
 from .extensions import mongo
@@ -15,9 +14,9 @@ class CustomModelView(ModelView):
     can_delete = True
     can_view_details = True
     
-    def __init__(self, collection, name, columns, *args, **kwargs):
+    def __init__(self, collection, endpoint, columns, *args, **kwargs):
         self._column_list = columns
-        super(CustomModelView, self).__init__(collection, name, *args, **kwargs)
+        super(CustomModelView, self).__init__(collection, endpoint=endpoint, *args, **kwargs)
 
     @property
     def column_list(self):
@@ -51,13 +50,8 @@ class CustomModelView(ModelView):
         if sort_field:
             sort = [(sort_field, -1 if sort_desc else 1)]
 
-        # Count total documents
         total_count = self.coll.count_documents(query)
-
-        # Ensure page number is at least 1
         page = max(1, page)
-
-        # Get paginated results
         results = self.coll.find(query)
         if sort:
             results = results.sort(sort)
@@ -92,9 +86,9 @@ class CustomModelView(ModelView):
         return True
 
 class FHIRMessageView(CustomModelView):
-    def __init__(self, collection, name, *args, **kwargs):
+    def __init__(self, collection, endpoint, *args, **kwargs):
         columns = ['original_message_uuid', 'fhir_content', 'conversion_metadata.conversion_time']
-        super(FHIRMessageView, self).__init__(collection, name, columns, *args, **kwargs)
+        super(FHIRMessageView, self).__init__(collection, endpoint, columns, *args, **kwargs)
 
     column_labels = {
         'original_message_uuid': 'Original UUID',
@@ -130,20 +124,46 @@ class FHIRMessageView(CustomModelView):
                 model['conversion_metadata'] = {}
             model['conversion_metadata']['conversion_time'] = form.data['conversion_time']
 
-def init_admin(app):
-    admin.init_app(app)
 
-    # Add views
-    admin.add_view(CustomModelView(mongo.db.streams, 'Streams', 
-                                   ['uuid', 'name', 'message_type', 'host', 'port', 'timeout', 'active', 'created_at', 'updated_at', 'last_active', 'deleted']))
-    admin.add_view(CustomModelView(mongo.db.messages, 'Messages', 
-                                   ['uuid', 'stream_uuid', 'message', 'parsed', 'timestamp', 'type', 'conversion_status']))
-    admin.add_view(CustomModelView(mongo.db.logs, 'Logs', 
-                                   ['stream_uuid', 'level', 'message', 'timestamp']))
-    admin.add_view(CustomModelView(mongo.db.parsing_logs, 'Parsing Logs', 
-                                   ['message_id', 'status', 'timestamp']))
-    admin.add_view(CustomModelView(mongo.db.validation_logs, 'Validation Logs', 
-                                   ['message_id', 'is_valid', 'timestamp']))
-    admin.add_view(FHIRMessageView(mongo.db.fhir_messages, 'FHIR Messages'))
+def init_admin(app):
+    if not admin.app:  # Only initialize if it hasn't been done already
+        admin.init_app(app)
+
+        # Add views
+        admin.add_view(CustomModelView(
+            mongo.db.streams, 
+            endpoint='streams_view',
+            name='Streams',
+            columns=['uuid', 'name', 'message_type', 'host', 'port', 'timeout', 'active', 'created_at', 'updated_at', 'last_active', 'deleted']
+        ))
+        admin.add_view(CustomModelView(
+            mongo.db.messages, 
+            endpoint='messages_view',
+            name='Messages',
+            columns=['uuid', 'stream_uuid', 'message', 'parsed', 'timestamp', 'type', 'conversion_status']
+        ))
+        admin.add_view(CustomModelView(
+            mongo.db.logs, 
+            endpoint='logs_view',
+            name='Logs',
+            columns=['stream_uuid', 'level', 'message', 'timestamp']
+        ))
+        admin.add_view(CustomModelView(
+            mongo.db.parsing_logs, 
+            endpoint='parsing_logs_view',
+            name='Parsing Logs',
+            columns=['message_id', 'status', 'timestamp']
+        ))
+        admin.add_view(CustomModelView(
+            mongo.db.validation_logs, 
+            endpoint='validation_logs_view',
+            name='Validation Logs',
+            columns=['message_id', 'is_valid', 'timestamp']
+        ))
+        admin.add_view(FHIRMessageView(
+            mongo.db.fhir_messages, 
+            endpoint='fhir_messages_view',
+            name='FHIR Messages'
+        ))
 
     return admin

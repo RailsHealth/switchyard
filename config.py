@@ -10,6 +10,19 @@ class Config:
     DEBUG = os.environ.get('FLASK_DEBUG') == 'True'
     PORT = int(os.environ.get('PORT', 5001))
 
+    # Redis configuration
+    REDIS_URL = os.environ.get('REDIS_URL') or 'redis://localhost:6379/0'
+
+    # Celery Configuration
+    broker_url = REDIS_URL
+    result_backend = REDIS_URL
+    task_serializer = 'json'
+    accept_content = ['json']
+    result_serializer = 'json'
+    timezone = 'UTC'
+    enable_utc = True
+    broker_connection_retry_on_startup = True
+
     # OAuth configurations
     GOOGLE_CLIENT_ID = os.environ.get('GOOGLE_CLIENT_ID')
     GOOGLE_CLIENT_SECRET = os.environ.get('GOOGLE_CLIENT_SECRET')
@@ -97,7 +110,6 @@ class Config:
 
     # Admin panel access
     ADMIN_PANEL_EMAILS = os.environ.get('ADMIN_PANEL_EMAILS', 'admin1@example.com,admin2@example.com,admin3@example.com').split(',')
-
 
     # Default organization name
     DEFAULT_ORGANIZATION_NAME = os.environ.get('DEFAULT_ORGANIZATION_NAME', 'Rails Health')

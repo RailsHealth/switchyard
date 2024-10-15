@@ -11,7 +11,8 @@ from app.services.fhir_validator import init_fhir_validator
 from app.auth import init_oauth
 from flask_wtf.csrf import CSRFProtect
 from app.services.health_data_converter import init_health_data_converter, scheduled_process_pending_conversions
-
+from . import services
+from app.celery_app import celery, init_celery
 
 csrf = CSRFProtect()
 
@@ -24,6 +25,27 @@ def create_app(config_class=Config):
     init_extensions(app)
     init_oauth(app)
     csrf.init_app(app)
+
+    # Initialize Celery
+    init_celery(app)
+
+    # Set Celery beat schedule
+    celery.conf.beat_schedule = {
+        'process-hl7v2-messages': {
+            'task': 'app.tasks.process_hl7v2_messages',
+            'schedule': 60.0,  # Run every minute
+            'args': (app.config, app.name)
+        },
+        'cleanup-old-messages': {
+            'task': 'app.tasks.cleanup_old_messages',
+            'schedule': 3600.0,  # Run every hour
+            'args': (30,)  # Delete messages older than 30 days
+        },
+        'check-stuck-messages': {
+            'task': 'app.tasks.check_stuck_messages',
+            'schedule': 900.0,  # Run every 15 minutes
+        }
+    }
 
     # Initialize Flask-Admin
     with app.app_context():
@@ -126,11 +148,7 @@ def create_app(config_class=Config):
         app.logger.setLevel(logging.INFO)
         app.logger.info('Rails Health startup')
 
-    # Initialize the conversion scheduler
-    from app.services.health_data_converter import init_conversion_scheduler
-    init_conversion_scheduler(app)
-
-    # Schedule other tasks
+    # Schedule tasks
     schedule_tasks(app)
 
     return app
@@ -205,3 +223,6 @@ def create_default_org_and_admins(app):
             elif org_uuid not in [org['uuid'] for org in user.get('organizations', [])]:
                 User.add_to_organization(user['uuid'], org_uuid, role='admin')
                 app.logger.info(f"Added existing user {email} to default organization as admin")
+
+# Import tasks here to avoid circular imports
+from app import tasks
