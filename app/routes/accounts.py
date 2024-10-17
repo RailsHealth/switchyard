@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, g, redirect, url_for, flash, current_app, jsonify, request
 from app.models.user import User
 from app.models.organization import Organization
-from app.middleware import login_required, admin_required
+from app.auth import login_required, admin_required
 from bson.objectid import ObjectId
 from datetime import datetime
 from app.extensions import mongo

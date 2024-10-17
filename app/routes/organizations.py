@@ -5,7 +5,8 @@ from flask import Blueprint, request, jsonify, render_template, redirect, url_fo
 from app.models.organization import Organization
 from app.models.user import User
 from app.extensions import mongo
-from app.middleware import login_required, admin_required, set_current_organization
+from app.middleware import set_current_organization
+from app.auth import login_required, admin_required
 from pymongo.errors import PyMongoError
 from flask_wtf import FlaskForm
 from wtforms import StringField, SelectField, TextAreaField

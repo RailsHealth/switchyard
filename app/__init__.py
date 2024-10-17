@@ -1,17 +1,17 @@
-from flask import Flask, render_template, g
-from config import Config
 import os
 import logging
-from app.services.fhir_translator import FHIRTranslator
-import uuid
+from flask import Flask, render_template, g
+from config import Config
 from datetime import datetime
-from .extensions import mongo, scheduler, oauth, init_extensions
+import uuid
+from .extensions import mongo, oauth, init_extensions
 from app.middleware import set_user_and_org_context, get_user_organizations, set_current_organization
+from app.services.fhir_translator import FHIRTranslator
 from app.services.fhir_validator import init_fhir_validator
 from app.auth import init_oauth
 from flask_wtf.csrf import CSRFProtect
-from app.services.health_data_converter import init_health_data_converter, scheduled_process_pending_conversions
-from . import services
+from app.services.health_data_converter import init_health_data_converter
+from app.services.fhir_service import initialize_fhir_interfaces
 from app.celery_app import celery, init_celery
 
 csrf = CSRFProtect()
@@ -22,6 +22,7 @@ def create_app(config_class=Config):
                 static_folder=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static')))
     app.config.from_object(config_class)
 
+    # Initialize extensions
     init_extensions(app)
     init_oauth(app)
     csrf.init_app(app)
@@ -33,18 +34,46 @@ def create_app(config_class=Config):
     celery.conf.beat_schedule = {
         'process-hl7v2-messages': {
             'task': 'app.tasks.process_hl7v2_messages',
-            'schedule': 60.0,  # Run every minute
+            'schedule': app.config['PROCESS_HL7V2_MESSAGES_INTERVAL'],
             'args': (app.config, app.name)
         },
         'cleanup-old-messages': {
             'task': 'app.tasks.cleanup_old_messages',
-            'schedule': 3600.0,  # Run every hour
+            'schedule': app.config['CLEANUP_OLD_MESSAGES_INTERVAL'],
             'args': (30,)  # Delete messages older than 30 days
         },
         'check-stuck-messages': {
             'task': 'app.tasks.check_stuck_messages',
-            'schedule': 900.0,  # Run every 15 minutes
-        }
+            'schedule': app.config['CHECK_STUCK_MESSAGES_INTERVAL'],
+        },
+        'fetch-fhir-data': {
+            'task': 'app.tasks.fetch_fhir_data',
+            'schedule': app.config['FETCH_FHIR_INTERVAL'],
+        },
+        'process-pending-conversions': {
+            'task': 'app.tasks.process_pending_conversions',
+            'schedule': app.config['PROCESS_PENDING_CONVERSIONS_INTERVAL'],
+        },
+        'parse-files': {
+            'task': 'app.tasks.parse_files',
+            'schedule': app.config['PARSE_FILES_INTERVAL'],
+        },
+        'validate-fhir-messages': {
+            'task': 'app.tasks.validate_fhir_messages',
+            'schedule': app.config['VALIDATE_FHIR_MESSAGES_INTERVAL'],
+        },
+        'log-conversion-metrics': {
+            'task': 'app.tasks.log_conversion_metrics',
+            'schedule': app.config['LOG_CONVERSION_METRICS_INTERVAL'],
+        },
+        'scheduled-maintenance': {
+            'task': 'app.tasks.scheduled_maintenance',
+            'schedule': app.config['SCHEDULED_MAINTENANCE_INTERVAL'],
+        },
+        'refresh-fhir-interfaces': {
+            'task': 'app.tasks.refresh_fhir_interfaces',
+            'schedule': app.config['REFRESH_FHIR_INTERFACES_INTERVAL'],
+        },
     }
 
     # Initialize Flask-Admin
@@ -62,18 +91,21 @@ def create_app(config_class=Config):
     # Initialize FHIRValidator
     init_fhir_validator(app)
 
-    # Initialize the conversion scheduler
+    # Initialize the health data converter
     init_health_data_converter(app, mongo)
+
+    # Initialize FHIR interfaces
+    initialize_fhir_interfaces()
 
     # Register blueprints
     from app.routes import main, streams, messages, logs, organizations, accounts
     from app.auth import bp as auth_bp
     app.register_blueprint(main.bp)
+    app.register_blueprint(auth_bp)
     app.register_blueprint(streams.bp, url_prefix='/streams')
     app.register_blueprint(messages.bp, url_prefix='/messages')
     app.register_blueprint(logs.bp, url_prefix='/logs')
     app.register_blueprint(organizations.bp, url_prefix='/organizations')
-    app.register_blueprint(auth_bp, url_prefix='/auth')
     app.register_blueprint(accounts.bp, url_prefix='/accounts')
 
     # Initialize MongoDB collections
@@ -139,52 +171,19 @@ def create_app(config_class=Config):
 
     # Logging setup
     if not app.debug and not app.testing:
-        file_handler = logging.FileHandler(filename='app.log')
+        if not os.path.exists('logs'):
+            os.mkdir('logs')
+        file_handler = logging.FileHandler('logs/rails_health.log')
         file_handler.setFormatter(logging.Formatter(
             '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
         ))
         file_handler.setLevel(logging.INFO)
         app.logger.addHandler(file_handler)
-        app.logger.setLevel(logging.INFO)
-        app.logger.info('Rails Health startup')
 
-    # Schedule tasks
-    schedule_tasks(app)
+    app.logger.setLevel(logging.INFO)
+    app.logger.info('Rails Health startup')
 
     return app
-
-def schedule_tasks(app):
-    @scheduler.task('interval', id='fetch_fhir_data', seconds=600, misfire_grace_time=900)
-    def fetch_fhir_data():
-        with app.app_context():
-            from app.routes.streams import fhir_interfaces
-            app.logger.info("Starting scheduled FHIR data fetch")
-            for stream_uuid, interface in fhir_interfaces.items():
-                if interface.listening:
-                    app.logger.info(f"Fetching data for FHIR stream: {stream_uuid}")
-                    interface.fetch_data()
-            app.logger.info("Completed scheduled FHIR data fetch")
-    
-    @scheduler.task('interval', id='process_pending_conversions', seconds=60, misfire_grace_time=300)
-    def process_pending_conversions_task():
-        with app.app_context():
-            scheduled_process_pending_conversions(app, mongo)
-    
-    @scheduler.task('interval', id='parse_files', seconds=30, misfire_grace_time=300)
-    def parse_files():
-        with app.app_context():
-            from app.services.file_parser_service import FileParserService
-            app.logger.info("Starting file parsing process")
-            FileParserService.process_pending_files()
-            app.logger.info("Completed file parsing process")
-
-    @scheduler.task('interval', id='validate_fhir_messages', seconds=300, misfire_grace_time=900)
-    def validate_fhir_messages():
-        with app.app_context():
-            from app.services.fhir_validator import FHIRValidator
-            app.logger.info("Starting FHIR message validation process")
-            FHIRValidator.validate_fhir_messages()
-            app.logger.info("Completed FHIR message validation process")
 
 def create_default_org_and_admins(app):
     from app.models.user import User

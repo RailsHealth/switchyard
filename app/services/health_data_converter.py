@@ -1,6 +1,6 @@
 import requests
 from flask import current_app
-from app.extensions import mongo, scheduler
+from app.extensions import mongo, celery
 from datetime import datetime, timedelta
 import time
 import json
@@ -10,7 +10,6 @@ from concurrent.futures import ThreadPoolExecutor
 import os
 from tenacity import retry, stop_after_attempt, wait_fixed
 from app.celery_app import celery
-from app.tasks import hl7v2_to_fhir_conversion
 
 # Constants
 MAX_RETRY_ATTEMPTS = 5
@@ -42,6 +41,7 @@ def send_conversion_request(url, payload):
     response.raise_for_status()
     return response
 
+@celery.task(name="health_data_converter.convert_to_fhir")
 def convert_to_fhir(app, message):
     start_time = time.time()
     app.logger.info(f"Starting conversion for message {message['uuid']}")
@@ -120,12 +120,14 @@ def convert_to_fhir(app, message):
         app.logger.error(f"Traceback: {traceback.format_exc()}")
         return None
 
+@celery.task(name="health_data_converter.process_message_type")
 def process_message_type(app, mongo, message_type):
     if message_type == "HL7v2":
         return process_hl7v2_messages(app, mongo)
     else:
         return process_other_message_type(app, mongo, message_type)
 
+@celery.task(name="health_data_converter.process_hl7v2_messages")
 def process_hl7v2_messages(app, mongo):
     app.logger.info("Starting process_hl7v2_messages function")
     query = {
@@ -144,7 +146,7 @@ def process_hl7v2_messages(app, mongo):
         message_id = str(message['_id'])
         if not celery.AsyncResult(message_id).state:
             app.logger.info(f"Queueing HL7v2 message {message_id} for conversion")
-            hl7v2_to_fhir_conversion.apply_async(args=[message_id], task_id=message_id, queue='hl7v2_conversion')
+            convert_to_fhir.apply_async(args=[app, message], task_id=message_id, queue='hl7v2_conversion')
             mongo.db.messages.update_one(
                 {"_id": message['_id']},
                 {"$set": {"conversion_status": "queued"}}
@@ -154,7 +156,7 @@ def process_hl7v2_messages(app, mongo):
     
     app.logger.info(f"Processed {len(pending_messages)} HL7v2 messages")
     return len(pending_messages)
-
+@celery.task(name="health_data_converter.process_other_message_type")
 def process_other_message_type(app, mongo, message_type):
     query = {
         "type": message_type,
@@ -178,7 +180,7 @@ def process_other_message_type(app, mongo, message_type):
         )
 
         app.logger.info(f"Processing message {message['uuid']} (current status: processing)")
-        result = convert_to_fhir(app, message)
+        result = convert_to_fhir.delay(app, message)
         if result:
             fhir_message = {
                 "original_message_uuid": message['uuid'],
@@ -239,16 +241,18 @@ def update_failed_message(mongo, message, error_message):
         {"$set": update_data}
     )
 
+@celery.task(name="health_data_converter.process_pending_conversions")
 def process_pending_conversions(app, mongo):
     message_types = ["Clinical Notes", "CCDA", "X12"]
     total_processed = 0
     
     for message_type in message_types:
-        processed_count = process_message_type(app, mongo, message_type)
+        processed_count = process_message_type.delay(app, mongo, message_type)
         total_processed += processed_count
     
     return total_processed
 
+@celery.task(name="health_data_converter.scheduled_process_pending_conversions")
 def scheduled_process_pending_conversions(app, mongo):
     app.logger.info("Starting FHIR conversion process for non-HL7v2 message types")
     
@@ -256,46 +260,12 @@ def scheduled_process_pending_conversions(app, mongo):
     total_processed = 0
     
     for message_type in message_types:
-        processed_count = process_message_type(app, mongo, message_type)
+        processed_count = process_message_type.delay(app, mongo, message_type)
         total_processed += processed_count
     
     app.logger.info(f"Completed FHIR conversion process. Processed {total_processed} non-HL7v2 messages.")
     
     return total_processed
-
-def init_conversion_scheduler(app):
-    executor = ThreadPoolExecutor(max_workers=MAX_INSTANCES)
-
-    @scheduler.task('interval', id='process_other_to_fhir', seconds=CHECK_INTERVAL, misfire_grace_time=300)
-    def scheduled_conversion_task():
-        with app.app_context():
-            pending_messages = list(mongo.db.messages.find({
-                "conversion_status": "pending",
-                "type": {"$ne": "HL7v2"}  # Exclude HL7v2 messages
-            }).limit(MAX_INSTANCES * 2))
-            futures = []
-            for message in pending_messages:
-                future = executor.submit(convert_to_fhir, app, message)
-                futures.append(future)
-            
-            # Wait for all conversions to complete
-            for future in futures:
-                future.result()
-
-    # Initial setup of the job
-    with app.app_context():
-        # Remove the job if it already exists
-        existing_job = scheduler.get_job('process_other_to_fhir')
-        if existing_job:
-            scheduler.remove_job('process_other_to_fhir')
-        
-        # Add the job with the correct parameters
-        scheduler.add_job(
-            func=scheduled_conversion_task,
-            trigger='interval',
-            seconds=CHECK_INTERVAL,
-            id='process_other_to_fhir'
-        )
 
 def get_conversion_statistics(app, mongo):
     stats = {}
@@ -319,49 +289,6 @@ def get_conversion_statistics(app, mongo):
         }
     
     return stats
-def manually_convert_message(app, mongo, message_uuid):
-    with app.app_context():
-        message = mongo.db.messages.find_one({"uuid": message_uuid})
-        if not message:
-            return {"status": "error", "message": "Message not found"}
-        
-        if message['type'] == 'HL7v2':
-            hl7v2_to_fhir_conversion.apply_async(args=[str(message['_id'])], queue='hl7v2_conversion')
-            return {"status": "success", "message": "HL7v2 conversion task queued successfully"}
-        else:
-            # Mark the message as processing
-            mongo.db.messages.update_one(
-                {"_id": message['_id']},
-                {"$set": {"conversion_status": "processing", "last_processing_start": datetime.utcnow()}}
-            )
-            
-            result = convert_to_fhir(app, message)
-            if result:
-                fhir_message = {
-                    "original_message_uuid": message['uuid'],
-                    "organization_uuid": message['organization_uuid'],
-                    "fhir_content": result['fhir_content'],
-                    "conversion_metadata": result['conversion_metadata']
-                }
-                
-                mongo.db.fhir_messages.update_one(
-                    {
-                        "original_message_uuid": message['uuid'],
-                        "organization_uuid": message['organization_uuid']
-                    },
-                    {"$set": fhir_message},
-                    upsert=True
-                )
-                
-                mongo.db.messages.update_one(
-                    {"_id": message['_id']},
-                    {"$set": {"conversion_status": "completed", "retry_count": 0, "last_converted_at": datetime.utcnow()}}
-                )
-                return {"status": "success", "message": "Conversion completed successfully"}
-            else:
-                error_message = f"Manual conversion failed for message {message['uuid']}"
-                update_failed_message(mongo, message, error_message)
-                return {"status": "error", "message": "Conversion failed"}
 
 def get_conversion_queue_status(app, mongo):
     pending_count = mongo.db.messages.count_documents({"conversion_status": "pending"})
@@ -379,6 +306,7 @@ def get_conversion_queue_status(app, mongo):
         "total": pending_count + failed_count + completed_count + error_count + processing_count
     }
 
+@celery.task(name="health_data_converter.reset_failed_conversions")
 def reset_failed_conversions(app, mongo):
     result = mongo.db.messages.update_many(
         {"conversion_status": {"$in": ["failed", "error"]}},
@@ -390,6 +318,7 @@ def reset_failed_conversions(app, mongo):
         "message": f"Reset {result.modified_count} failed and error conversions to pending status."
     }
 
+@celery.task(name="health_data_converter.get_conversion_errors")
 def get_conversion_errors(app, mongo, limit=100):
     errors = list(mongo.db.messages.find(
         {"conversion_status": {"$in": ["failed", "error"]}},
@@ -398,6 +327,7 @@ def get_conversion_errors(app, mongo, limit=100):
     
     return errors
 
+@celery.task(name="health_data_converter.cleanup_stuck_messages")
 def cleanup_stuck_messages(app, mongo):
     timeout = datetime.utcnow() - timedelta(seconds=PROCESSING_TIMEOUT)
     result = mongo.db.messages.update_many(
@@ -430,10 +360,7 @@ def initialize_database_indexes(app, mongo):
 
         app.logger.info("Database indexes initialized successfully.")
 
-def run_periodic_cleanup(app, mongo):
-    cleanup_stuck_messages(app, mongo)
-    # Add any other periodic cleanup tasks here
-
+@celery.task(name="health_data_converter.log_conversion_metrics")
 def log_conversion_metrics(app, mongo):
     stats = get_conversion_statistics(app, mongo)
     queue_status = get_conversion_queue_status(app, mongo)
@@ -445,59 +372,6 @@ def init_health_data_converter(app, mongo):
     app.logger.info("Initializing health data converter")
     initialize_database_indexes(app, mongo)
     
-    # Start the APScheduler
-    if not scheduler.running:
-        scheduler.start()
-        app.logger.info("APScheduler started")
-    else:
-        app.logger.info("APScheduler was already running")
-
-    # Schedule periodic tasks
-    scheduler.add_job(
-        func=run_periodic_cleanup,
-        trigger='interval',
-        minutes=30,
-        id='periodic_cleanup',
-        args=[app, mongo],
-        replace_existing=True
-    )
-    app.logger.info("Scheduled periodic cleanup task")
-
-    scheduler.add_job(
-        func=log_conversion_metrics,
-        trigger='interval',
-        minutes=15,
-        id='log_conversion_metrics',
-        args=[app, mongo],
-        replace_existing=True
-    )
-    app.logger.info("Scheduled log conversion metrics task")
-
-    scheduler.add_job(
-        func=scheduled_process_pending_conversions,
-        trigger='interval',
-        seconds=CHECK_INTERVAL,
-        id='process_other_messages',
-        args=[app, mongo],
-        replace_existing=True
-    )
-    app.logger.info("Scheduled process pending conversions task")
-
-    # Log all current jobs
-    jobs = scheduler.get_jobs()
-    app.logger.info(f"Current APScheduler jobs: {[job.id for job in jobs]}")
-
-    app.logger.info("Health Data Converter initialized successfully")
-
-    # Celery beat schedule for HL7v2 conversion
-    celery.conf.beat_schedule = {
-        'process-hl7v2-conversions': {
-            'task': 'app.tasks.process_hl7v2_messages',
-            'schedule': timedelta(seconds=CHECK_INTERVAL),
-            'args': (app.config, mongo.cx.get_database().name)
-        },
-    }
-
     app.logger.info("Health Data Converter initialized successfully")
 
 if __name__ == "__main__":

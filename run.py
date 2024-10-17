@@ -2,19 +2,19 @@ import logging
 import subprocess
 import sys
 import os
-import time
 import signal
 from app import create_app
 from config import Config
-from app.extensions import scheduler, celery
+from app.extensions import mongo
 from flask.cli import FlaskGroup
 import redis
-from apscheduler.schedulers import SchedulerNotRunningError
 import click
 
 # Setup the main logger
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 app_logger = logging.getLogger('app')
+
+print("Config object:", vars(Config))
 
 app = create_app(Config)
 cli = FlaskGroup(app)
@@ -29,7 +29,7 @@ def start_celery_worker():
         sys.executable, '-m', 'celery',
         '-A', 'app.celery_app', 'worker',
         '--loglevel=info',
-        '-Q', 'hl7v2_conversion'
+        '-Q', 'hl7v2_conversion,fhir_queue,conversion_queue,file_queue,validation_queue,maintenance_queue,metrics_queue'
     ]
     worker_process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     return worker_process
@@ -68,12 +68,6 @@ def cleanup():
     if beat_process:
         beat_process.terminate()
         app_logger.info("Celery beat terminated")
-    try:
-        if scheduler.running:
-            scheduler.shutdown()
-            app_logger.info("APScheduler shut down")
-    except SchedulerNotRunningError:
-        app_logger.info("APScheduler was not running")
     app_logger.info("All processes terminated")
 
 def run_app():
@@ -91,13 +85,6 @@ def run_app():
         # Start Celery beat
         start_celery_beat()
         app_logger.info("Celery beat started")
-
-        # Start APScheduler
-        with app.app_context():
-            scheduler.app = app
-            if not scheduler.running:
-                scheduler.start()
-                app_logger.info("APScheduler started")
 
         # Set up signal handlers for graceful shutdown
         signal.signal(signal.SIGINT, signal_handler)
@@ -125,7 +112,7 @@ def celery_worker():
         '-A', 'app.celery_app',
         'worker',
         '--loglevel=info',
-        '-Q', 'hl7v2_conversion'
+        '-Q', 'hl7v2_conversion,fhir_queue,conversion_queue,file_queue,validation_queue,maintenance_queue,metrics_queue'
     ])
 
 @cli.command("celery-beat")
@@ -141,7 +128,6 @@ def celery_beat():
 @cli.command("init-db")
 def init_db():
     """Initialize the database."""
-    from app.extensions import mongo
     with app.app_context():
         # Add your database initialization logic here
         app_logger.info("Initializing database...")

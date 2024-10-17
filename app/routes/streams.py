@@ -10,7 +10,8 @@ from bson import json_util
 import json
 from math import ceil
 from app.models.organization import Organization
-from app.middleware import login_required, admin_required
+from app.services.fhir_service import fhir_interfaces, initialize_fhir_interfaces
+from app.auth import login_required, admin_required
 from pymongo.errors import PyMongoError
 from flask_wtf import FlaskForm
 from wtforms import StringField, IntegerField, SelectField

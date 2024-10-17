@@ -1,7 +1,7 @@
 from flask import Blueprint, render_template, redirect, url_for, current_app, g, flash, request
 from app.extensions import mongo
 from pymongo.errors import PyMongoError
-from app.middleware import login_required, admin_required
+from app.auth import login_required, admin_required
 from app.models.organization import Organization
 from app.models.user import User
 

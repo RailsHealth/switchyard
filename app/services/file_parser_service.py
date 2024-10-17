@@ -2,10 +2,11 @@ import pdfplumber
 from lxml import etree
 import os
 import re
-from app.extensions import mongo
+from app.extensions import mongo, celery
 from datetime import datetime
 from bson import ObjectId
 from io import StringIO
+from app.celery_app import celery
 
 class FileParserService:
     @staticmethod
@@ -112,6 +113,7 @@ class FileParserService:
             return {"error": f"Failed to parse X12: {str(e)}"}
 
     @staticmethod
+    @celery.task(name="file_parser_service.extract_and_parse_file")
     def extract_and_parse_file(message_id):
         message = mongo.db.messages.find_one({"_id": ObjectId(message_id)})
         if not message:
@@ -234,6 +236,7 @@ class FileParserService:
         mongo.db.parsing_logs.insert_one(log_entry)
 
     @staticmethod
+    @celery.task(name="file_parser_service.process_pending_files")
     def process_pending_files(organization_uuid=None):
         query = {
             "parsing_status": "pending",
@@ -244,7 +247,7 @@ class FileParserService:
 
         pending_messages = mongo.db.messages.find(query)
         for message in pending_messages:
-            FileParserService.extract_and_parse_file(str(message['_id']))
+            FileParserService.extract_and_parse_file.delay(str(message['_id']))
 
     @staticmethod
     def get_file_type(file_path):

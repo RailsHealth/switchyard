@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from math import ceil
 from app.models.organization import Organization
-from app.middleware import login_required, admin_required
+from app.auth import login_required, admin_required
 from pymongo.errors import PyMongoError
 
 bp = Blueprint('logs', __name__)

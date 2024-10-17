@@ -7,13 +7,17 @@ from datetime import datetime, timedelta
 from bson import ObjectId
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 from requests.exceptions import RequestException
+from app.services.file_parser_service import FileParserService
+from app.services.fhir_validator import FHIRValidator
+from app.services.health_data_converter import process_pending_conversions as hdc_process_pending_conversions
+from app.services.fhir_service import scheduled_fhir_fetch
 
 # Constants
 MAX_RETRY_ATTEMPTS = 5
 PROCESSING_TIMEOUT = 300  # 5 minutes
 
 @celery.task
-def process_hl7v2_messages():
+def process_hl7v2_messages(app_config, app_name):
     current_app.logger.info("Starting process_hl7v2_messages Celery task")
     from app.services.health_data_converter import process_hl7v2_messages as process_messages
     result = process_messages(current_app, mongo)
@@ -154,15 +158,53 @@ def check_stuck_messages():
     current_app.logger.info(f"Reset {count} stuck messages")
     return count
 
-@celery.on_after_configure.connect
-def setup_periodic_tasks(sender, **kwargs):
-    sender.add_periodic_task(
-        3600.0,  # 1 hour
-        cleanup_old_messages.s(days=30),
-        name='cleanup old messages every hour'
-    )
-    sender.add_periodic_task(
-        900.0,  # 15 minutes
-        check_stuck_messages.s(),
-        name='check for stuck messages every 15 minutes'
-    )
+@celery.task
+def fetch_fhir_data():
+    current_app.logger.info("Starting scheduled FHIR data fetch")
+    scheduled_fhir_fetch()
+    current_app.logger.info("Completed scheduled FHIR data fetch")
+
+@celery.task
+def process_pending_conversions():
+    with current_app.app_context():
+        return hdc_process_pending_conversions(current_app, mongo)
+
+@celery.task
+def parse_files():
+    current_app.logger.info("Starting file parsing process")
+    FileParserService.process_pending_files()
+    current_app.logger.info("Completed file parsing process")
+
+@celery.task
+def validate_fhir_messages():
+    current_app.logger.info("Starting FHIR message validation process")
+    FHIRValidator.validate_fhir_messages()
+    current_app.logger.info("Completed FHIR message validation process")
+
+@celery.task
+def log_conversion_metrics():
+    from app.services.health_data_converter import get_conversion_statistics, get_conversion_queue_status
+    
+    stats = get_conversion_statistics(current_app, mongo)
+    queue_status = get_conversion_queue_status(current_app, mongo)
+    
+    current_app.logger.info(f"Conversion Queue Status: {json.dumps(queue_status)}")
+    current_app.logger.info(f"Conversion Statistics: {json.dumps(stats)}")
+
+@celery.task
+def scheduled_maintenance():
+    current_app.logger.info("Starting scheduled maintenance tasks")
+    cleanup_old_messages.delay()
+    check_stuck_messages.delay()
+    current_app.logger.info("Completed scheduled maintenance tasks")
+
+@celery.task
+def refresh_fhir_interfaces():
+    from app.services.fhir_service import initialize_fhir_interfaces
+    current_app.logger.info("Refreshing FHIR interfaces")
+    initialize_fhir_interfaces()
+    current_app.logger.info("FHIR interfaces refreshed")
+
+# Additional tasks can be added here as needed
+
+# Note: Periodic task scheduling is handled in __init__.py

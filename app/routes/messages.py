@@ -11,7 +11,7 @@ from app.services.health_data_converter import convert_to_fhir
 from app.models.fhir_message import FHIRMessage
 import uuid
 from app.models.organization import Organization
-from app.middleware import login_required, admin_required
+from app.auth import login_required, admin_required
 from flask_wtf import FlaskForm
 from wtforms import StringField, IntegerField, SelectField, TextAreaField
 from wtforms.validators import DataRequired, NumberRange

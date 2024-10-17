@@ -4,21 +4,10 @@ from app.models.organization import Organization
 from datetime import datetime
 from app.extensions import oauth
 from flask_wtf import FlaskForm
-
-bp = Blueprint('auth', __name__)
+from . import bp
 
 class LoginForm(FlaskForm):
     pass
-
-def init_oauth(app):
-    oauth.init_app(app)
-    oauth.register(
-        name='google',
-        client_id=app.config['GOOGLE_CLIENT_ID'],
-        client_secret=app.config['GOOGLE_CLIENT_SECRET'],
-        server_metadata_url='https://accounts.google.com/.well-known/openid-configuration',
-        client_kwargs={'scope': 'openid email profile'},
-    )
 
 @bp.route('/login', methods=['GET', 'POST'])
 def login():
