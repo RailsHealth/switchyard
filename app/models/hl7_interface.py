@@ -8,9 +8,8 @@ from app.extensions import mongo
 from datetime import datetime
 import logging
 import uuid
-import json
 from flask import current_app
-from app.tasks import hl7v2_to_fhir_conversion
+from app.utils.logging_utils import log_message_cycle
 
 class HL7v2Interface:
     def __init__(self, stream_uuid, host, port, timeout=60, organization_uuid=None):
@@ -51,6 +50,7 @@ class HL7v2Interface:
             if result.acknowledged:
                 message_id = str(result.inserted_id)
                 self.logger.info(f"Message stored successfully: {message_id}")
+                log_message_cycle(message_dict['uuid'], self.organization_uuid, "message_received", "HL7v2", {}, "success")
                 
                 # Queue the message for conversion
                 try:
@@ -62,18 +62,31 @@ class HL7v2Interface:
                         {"_id": result.inserted_id},
                         {"$set": {"conversion_status": "queue_failed"}}
                     )
+                    log_message_cycle(message_dict['uuid'], self.organization_uuid, "queue_failed", "HL7v2", 
+                                      {"error": str(queue_error)}, "error")
             else:
                 self.logger.error(f"Failed to store message in MongoDB: {message_dict['uuid']}")
+                log_message_cycle(message_dict['uuid'], self.organization_uuid, "store_failed", "HL7v2", {}, "error")
         except Exception as e:
             self.logger.error(f"Error storing message in MongoDB: {str(e)}")
             self.logger.debug(f"Message that failed to store: {message_dict}")
+            log_message_cycle(message_dict['uuid'], self.organization_uuid, "store_failed", "HL7v2", 
+                              {"error": str(e)}, "error")
 
     def _queue_message_for_conversion(self, message_id):
         try:
-            task = hl7v2_to_fhir_conversion.apply_async(args=[message_id], queue='hl7v2_conversion')
+            # Lazy import to avoid circular dependency
+            from app.tasks import generic_to_fhir_conversion
+            
+            task = generic_to_fhir_conversion.apply_async(args=[str(message_id), "HL7v2"],
+                                                          queue='hl7v2_conversion')
             self.logger.info(f"Successfully queued message {message_id} for conversion. Task ID: {task.id}")
+            log_message_cycle(str(message_id), self.organization_uuid, "queued_for_conversion", "HL7v2", 
+                              {"task_id": task.id}, "success")
         except Exception as e:
             self.logger.error(f"Failed to queue message {message_id} for conversion: {str(e)}")
+            log_message_cycle(str(message_id), self.organization_uuid, "queue_failed", "HL7v2", 
+                              {"error": str(e)}, "error")
             raise
 
     def _store_log(self, level, message):

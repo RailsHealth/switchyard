@@ -6,7 +6,9 @@ import requests
 from flask import current_app
 from app.extensions import mongo
 import json
+import uuid
 from app.services.fhir_validator import FHIRValidator
+from app.utils.logging_utils import log_message_cycle
 
 class FHIRInterface:
     def __init__(self, stream_uuid, url, fhir_version, mongo_uri, organization_uuid):
@@ -28,7 +30,7 @@ class FHIRInterface:
         self.logger = logging.getLogger(f'FHIRInterface-{stream_uuid}')
         self.logger.setLevel(logging.DEBUG)
 
-        self.db=mongo.db
+        self.db = mongo.db
         self.messages_collection = self.db["messages"]
         self.logs_collection = self.db["logs"]
 
@@ -39,6 +41,8 @@ class FHIRInterface:
             self.last_fetch_time = self._get_last_fetch_time()
             self.logger.info(f"Started listening to FHIR server: {self.url}")
             self._store_log(logging.INFO, f"Started listening to FHIR server: {self.url}")
+            log_message_cycle(self.stream_uuid, self.organization_uuid, "start_listening", "FHIR", 
+                              {"url": self.url}, "success")
             self.fetch_thread = threading.Thread(target=self._fetch_loop)
             self.fetch_thread.start()
 
@@ -56,6 +60,8 @@ class FHIRInterface:
             
             self.logger.info(f"Stopped listening to FHIR server: {self.url}")
             self._store_log(logging.INFO, f"Stopped listening to FHIR server: {self.url}")
+            log_message_cycle(self.stream_uuid, self.organization_uuid, "stop_listening", "FHIR", 
+                              {"url": self.url}, "success")
 
     def _fetch_loop(self):
         while not self.shutdown_event.is_set():
@@ -63,6 +69,8 @@ class FHIRInterface:
                 self.fetch_data()
             except Exception as e:
                 self.logger.error(f"Error in fetch loop: {str(e)}")
+                log_message_cycle(self.stream_uuid, self.organization_uuid, "fetch_error", "FHIR", 
+                                  {"error": str(e)}, "error")
             
             # Check shutdown_event every second for more responsiveness
             for _ in range(self.fetch_interval):
@@ -103,11 +111,15 @@ class FHIRInterface:
                             break
                     else:
                         self.logger.warning(f"Unexpected response format: {bundle}")
+                        log_message_cycle(self.stream_uuid, self.organization_uuid, "unexpected_response", "FHIR", 
+                                          {"response": str(bundle)[:200]}, "warning")
                         break
 
         except Exception as e:
             self.logger.error(f"Error fetching data: {str(e)}")
             self._store_log(logging.ERROR, f"Error fetching data: {str(e)}")
+            log_message_cycle(self.stream_uuid, self.organization_uuid, "fetch_error", "FHIR", 
+                              {"error": str(e)}, "error")
 
     def _make_request(self, method, url, **kwargs):
         for attempt in range(self.max_retries):
@@ -126,6 +138,7 @@ class FHIRInterface:
 
     def _store_message(self, message):
         message_dict = {
+            "uuid": str(uuid.uuid4()),
             "stream_uuid": self.stream_uuid,
             "organization_uuid": self.organization_uuid,
             "message": json.dumps(message),
@@ -135,10 +148,13 @@ class FHIRInterface:
             "validation_status": "pending"
         }
         try:
-            self.logger.debug(f"Attempting to store FHIR message: {message_dict}")
+            self.logger.debug(f"Attempting to store FHIR message: {message_dict['uuid']}")
             result = self.messages_collection.insert_one(message_dict)
             if result.acknowledged:
-                self.logger.info(f"FHIR message stored: {message_dict['message'][:100]}...")
+                self.logger.info(f"FHIR message stored: {message_dict['uuid']}")
+                log_message_cycle(message_dict['uuid'], self.organization_uuid, "message_stored", "FHIR", 
+                                  {}, "success")
+                
                 is_valid, validation_message = FHIRValidator.validate_fhir_message(message)
             
                 # Update the message with validation results
@@ -153,9 +169,13 @@ class FHIRInterface:
                 )
                 self._store_validation_log(result.inserted_id, is_valid, validation_message)
             else:
-                self.logger.error(f"Failed to store FHIR message in MongoDB: {message_dict['message'][:100]}...")
+                self.logger.error(f"Failed to store FHIR message in MongoDB: {message_dict['uuid']}")
+                log_message_cycle(message_dict['uuid'], self.organization_uuid, "store_failed", "FHIR", 
+                                  {}, "error")
         except Exception as e:
             self.logger.error(f"Failed to store FHIR message in MongoDB: {e}")
+            log_message_cycle(message_dict['uuid'], self.organization_uuid, "store_failed", "FHIR", 
+                              {"error": str(e)}, "error")
 
     def _store_validation_log(self, message_id, is_valid, validation_message):
         log_entry = {
@@ -168,8 +188,12 @@ class FHIRInterface:
         }
         try:
             self.db.validation_logs.insert_one(log_entry)
+            log_message_cycle(str(message_id), self.organization_uuid, "validation_logged", "FHIR", 
+                              {"is_valid": is_valid}, "success")
         except Exception as e:
-            self.logger.error(f"Failed to store validation log: {e}")            
+            self.logger.error(f"Failed to store validation log: {e}")
+            log_message_cycle(str(message_id), self.organization_uuid, "validation_log_failed", "FHIR", 
+                              {"error": str(e)}, "error")
 
     def _store_log(self, level, message):
         log_entry = {

@@ -12,9 +12,25 @@ from app.auth import init_oauth
 from flask_wtf.csrf import CSRFProtect
 from app.services.health_data_converter import init_health_data_converter
 from app.services.fhir_service import initialize_fhir_interfaces
-from app.celery_app import celery, init_celery
+from celery import Celery
 
 csrf = CSRFProtect()
+
+celery = Celery(__name__)
+
+def init_celery(app=None):
+    if app is None:
+        return celery
+
+    celery.conf.update(app.config)
+
+    class ContextTask(celery.Task):
+        def __call__(self, *args, **kwargs):
+            with app.app_context():
+                return self.run(*args, **kwargs)
+
+    celery.Task = ContextTask
+    return celery
 
 def create_app(config_class=Config):
     app = Flask(__name__,
@@ -32,10 +48,9 @@ def create_app(config_class=Config):
 
     # Set Celery beat schedule
     celery.conf.beat_schedule = {
-        'process-hl7v2-messages': {
-            'task': 'app.tasks.process_hl7v2_messages',
-            'schedule': app.config['PROCESS_HL7V2_MESSAGES_INTERVAL'],
-            'args': (app.config, app.name)
+        'process-all-message-types': {
+            'task': 'app.tasks.process_all_message_types',
+            'schedule': app.config['PROCESS_PENDING_CONVERSIONS_INTERVAL'],
         },
         'cleanup-old-messages': {
             'task': 'app.tasks.cleanup_old_messages',
@@ -49,10 +64,6 @@ def create_app(config_class=Config):
         'fetch-fhir-data': {
             'task': 'app.tasks.fetch_fhir_data',
             'schedule': app.config['FETCH_FHIR_INTERVAL'],
-        },
-        'process-pending-conversions': {
-            'task': 'app.tasks.process_pending_conversions',
-            'schedule': app.config['PROCESS_PENDING_CONVERSIONS_INTERVAL'],
         },
         'parse-files': {
             'task': 'app.tasks.parse_files',
@@ -92,10 +103,12 @@ def create_app(config_class=Config):
     init_fhir_validator(app)
 
     # Initialize the health data converter
-    init_health_data_converter(app, mongo)
+    with app.app_context():
+        init_health_data_converter(app, mongo)
 
     # Initialize FHIR interfaces
-    initialize_fhir_interfaces()
+    with app.app_context():
+        initialize_fhir_interfaces()
 
     # Register blueprints
     from app.routes import main, streams, messages, logs, organizations, accounts
@@ -118,6 +131,8 @@ def create_app(config_class=Config):
             mongo.db.create_collection('parsing_logs')
         if 'validation_logs' not in mongo.db.list_collection_names():
             mongo.db.create_collection('validation_logs')
+        if 'message_cycle_logs' not in mongo.db.list_collection_names():
+            mongo.db.create_collection('message_cycle_logs')
         mongo.db.streams.update_many(
             {"files_processed": {"$exists": False}},
             {"$set": {"files_processed": 0}}
@@ -156,7 +171,8 @@ def create_app(config_class=Config):
             mongo.db.streams.insert_one(pasted_stream)
 
     # Create default organization and add admin panel users
-    create_default_org_and_admins(app)
+    with app.app_context():
+        create_default_org_and_admins(app)
 
     # Error handlers
     @app.errorhandler(404)
@@ -189,39 +205,41 @@ def create_default_org_and_admins(app):
     from app.models.user import User
     from app.models.organization import Organization
     
-    with app.app_context():
-        # Create default organization if it doesn't exist
-        default_org = next((org for org in Organization.list_all() if org['name'] == app.config['DEFAULT_ORGANIZATION_NAME']), None)
-        if not default_org:
-            org_uuid = Organization.create(
-                name=app.config['DEFAULT_ORGANIZATION_NAME'],
-                org_type="Healthcare Provider"
-            )
-            app.logger.info(f"Created default organization: {app.config['DEFAULT_ORGANIZATION_NAME']}")
-        else:
-            org_uuid = default_org['uuid']
-
-        # Update "Pasted Messages" stream with the default organization UUID
-        mongo.db.streams.update_one(
-            {"name": "Pasted Messages"},
-            {"$set": {"organization_uuid": org_uuid}}
+    # Create default organization if it doesn't exist
+    default_org = next((org for org in Organization.list_all() if org['name'] == app.config['DEFAULT_ORGANIZATION_NAME']), None)
+    if not default_org:
+        org_uuid = Organization.create(
+            name=app.config['DEFAULT_ORGANIZATION_NAME'],
+            org_type="Healthcare Provider"
         )
+        app.logger.info(f"Created default organization: {app.config['DEFAULT_ORGANIZATION_NAME']}")
+    else:
+        org_uuid = default_org['uuid']
 
-        # Add admin panel users
-        for email in app.config['ADMIN_PANEL_EMAILS']:
-            user = User.get_by_email(email)
-            if not user:
-                user_uuid = User.create(
-                    google_id=None,  # This will be set when the user first logs in
-                    name=email.split('@')[0],  # Use part before @ as name
-                    email=email,
-                    profile_picture_url=""
-                )
-                User.add_to_organization(user_uuid, org_uuid, role='admin')
-                app.logger.info(f"Added admin panel user: {email}")
-            elif org_uuid not in [org['uuid'] for org in user.get('organizations', [])]:
-                User.add_to_organization(user['uuid'], org_uuid, role='admin')
-                app.logger.info(f"Added existing user {email} to default organization as admin")
+    # Update "Pasted Messages" stream with the default organization UUID
+    mongo.db.streams.update_one(
+        {"name": "Pasted Messages"},
+        {"$set": {"organization_uuid": org_uuid}}
+    )
+
+    # Add admin panel users
+    for email in app.config['ADMIN_PANEL_EMAILS']:
+        user = User.get_by_email(email)
+        if not user:
+            user_uuid = User.create(
+                google_id=None,  # This will be set when the user first logs in
+                name=email.split('@')[0],  # Use part before @ as name
+                email=email,
+                profile_picture_url=""
+            )
+            User.add_to_organization(user_uuid, org_uuid, role='admin')
+            app.logger.info(f"Added admin panel user: {email}")
+        elif org_uuid not in [org['uuid'] for org in user.get('organizations', [])]:
+            User.add_to_organization(user['uuid'], org_uuid, role='admin')
+            app.logger.info(f"Added existing user {email} to default organization as admin")
+
+# Initialize Celery
+celery = init_celery()
 
 # Import tasks here to avoid circular imports
 from app import tasks

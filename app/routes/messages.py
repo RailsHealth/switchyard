@@ -16,6 +16,8 @@ from flask_wtf import FlaskForm
 from wtforms import StringField, IntegerField, SelectField, TextAreaField
 from wtforms.validators import DataRequired, NumberRange
 from wtforms import RadioField
+from app.tasks import parse_pasted_message
+from app.utils.logging_utils import log_message_cycle
 
 bp = Blueprint('messages', __name__)
 
@@ -113,10 +115,28 @@ def create_message():
             message_type = form.message_type.data
             message_content = form.message_content.data
             
+            # Find or create the "Pasted Messages" stream for the current organization
             pasted_stream = mongo.db.streams.find_one({
                 "name": "Pasted Messages",
                 "organization_uuid": g.organization['uuid']
             })
+            
+            if not pasted_stream:
+                # Create the "Pasted Messages" stream if it doesn't exist for this organization
+                pasted_stream = {
+                    "uuid": str(uuid.uuid4()),
+                    "name": "Pasted Messages",
+                    "message_type": "Mixed",
+                    "active": True,
+                    "created_at": datetime.utcnow(),
+                    "updated_at": datetime.utcnow(),
+                    "deleted": False,
+                    "is_default": True,
+                    "files_processed": 0,
+                    "organization_uuid": g.organization['uuid']
+                }
+                mongo.db.streams.insert_one(pasted_stream)
+                current_app.logger.info(f"Created 'Pasted Messages' stream for organization {g.organization['uuid']}")
             
             message_uuid = str(uuid.uuid4())
             message = {
@@ -126,29 +146,75 @@ def create_message():
                 "message": message_content,
                 "type": message_type,
                 "timestamp": datetime.utcnow(),
-                "parsed": True,
-                "parsing_status": "completed",
-                "conversion_status": "pending" if message_type in ["HL7v2", "Clinical Notes", "CCDA", "X12"] else "not_applicable"
+                "parsed": False,
+                "parsing_status": "pending",
+                "conversion_status": "pending_parsing"
             }
+            
+            # Log the message creation
+            log_message_cycle(
+                message_uuid, 
+                g.organization['uuid'], 
+                "message_created", 
+                message_type, 
+                {"stream": "Pasted Messages"}, 
+                "success"
+            )
             
             result = mongo.db.messages.insert_one(message)
-            inserted_id = result.inserted_id
+            inserted_id = str(result.inserted_id)
             
-            log_entry = {
-                "stream_uuid": pasted_stream['uuid'],
-                "organization_uuid": g.organization['uuid'],
-                "level": "INFO",
-                "message": f"New {message_type} message manually input and saved (UUID: {message_uuid})",
-                "timestamp": datetime.utcnow()
-            }
-            mongo.db.logs.insert_one(log_entry)
+            # Log the message storage
+            log_message_cycle(
+                message_uuid, 
+                g.organization['uuid'], 
+                "message_stored", 
+                message_type, 
+                {"mongodb_id": inserted_id}, 
+                "success"
+            )
             
-            if message_type in ["HL7v2", "Clinical Notes", "CCDA", "X12"]:
-                return jsonify({'status': 'success', 'message': 'Message saved successfully. Conversion to FHIR is in progress.', 'message_id': str(inserted_id)}), 200
-            else:
-                return jsonify({'status': 'success', 'message': 'Message saved successfully.', 'message_id': str(inserted_id)}), 200
+            # Queue the message for parsing
+            try:
+                parse_task = parse_pasted_message.apply_async(args=[inserted_id], queue='file_parsing')
+                
+                # Log the queuing for parsing
+                log_message_cycle(
+                    message_uuid, 
+                    g.organization['uuid'], 
+                    "queued_for_parsing", 
+                    message_type, 
+                    {"task_id": parse_task.id}, 
+                    "success"
+                )
+            except Exception as e:
+                # Log the queuing failure
+                log_message_cycle(
+                    message_uuid, 
+                    g.organization['uuid'], 
+                    "queue_for_parsing_failed", 
+                    message_type, 
+                    {"error": str(e)}, 
+                    "error",
+                    error_message=str(e)
+                )
+                raise
+            
+            return jsonify({'status': 'success', 'message': 'Message saved and queued for processing.', 'message_id': inserted_id}), 200
         except Exception as e:
             current_app.logger.error(f"Error creating message: {str(e)}", exc_info=True)
+            
+            # Log the overall failure
+            log_message_cycle(
+                message_uuid, 
+                g.organization['uuid'], 
+                "message_creation_failed", 
+                message_type, 
+                {"error": str(e)}, 
+                "error",
+                error_message=str(e)
+            )
+            
             return jsonify({'status': 'error', 'message': 'An error occurred while creating the message.'}), 500
     else:
         return jsonify({'status': 'error', 'message': 'Invalid form submission', 'errors': form.errors}), 400

@@ -1,6 +1,6 @@
 import requests
 from flask import current_app
-from app.extensions import mongo, celery
+from app.extensions import mongo
 from datetime import datetime, timedelta
 import time
 import json
@@ -9,87 +9,101 @@ import traceback
 from concurrent.futures import ThreadPoolExecutor
 import os
 from tenacity import retry, stop_after_attempt, wait_fixed
-from app.celery_app import celery
+from app.utils.logging_utils import log_message_cycle
+from app.services.external_api_service import get_endpoint_config, convert_message, validate_api_response
 
 # Constants
-MAX_RETRY_ATTEMPTS = 5
+MAX_RETRY_ATTEMPTS_NEW = 1
+MAX_RETRY_ATTEMPTS_CURRENT = 3
 RETRY_DELAY = 600  # 10 minutes in seconds
 BATCH_SIZE = 5
 CHECK_INTERVAL = 10  # 10 seconds between checks for new messages
 MAX_INSTANCES = 3  # Use the number of CPU cores available
 PROCESSING_TIMEOUT = 300  # 5 minutes
 
-def parse_json_safely(json_string):
-    try:
-        return json.loads(json_string)
-    except json.JSONDecodeError as e:
-        current_app.logger.warning(f"JSONDecodeError at position {e.pos}: {str(e)}")
-        valid_json = json_string[:e.pos]
-        return json.loads(valid_json + "}")  # Add closing brace if needed
-
-def validate_api_response(app, response_data):
-    required_keys = ['UUID', 'CreationTimestamp', 'ConversionTimestamp', 'OriginalDataType', 'MessageBody', 'Isvalidated']
-    missing_keys = [key for key in required_keys if key not in response_data]
-    if missing_keys:
-        app.logger.error(f"API response is missing required fields: {', '.join(missing_keys)}")
-        return False
-    return True
-
 @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-def send_conversion_request(url, payload):
+def send_conversion_request(url, payload, attempt, endpoint_type):
+    start_time = time.time()
     response = requests.post(url, json=payload, timeout=30)
+    response_time = time.time() - start_time
+    
+    log_message_cycle(
+        payload['UUID'],
+        payload.get('organization_uuid'),
+        "api_call",
+        payload['OriginalDataType'],
+        {
+            "endpoint_type": endpoint_type,
+            "attempt": attempt,
+            "response_time": response_time,
+            "status_code": response.status_code
+        },
+        "success" if response.status_code == 200 else "error"
+    )
+    
     response.raise_for_status()
     return response
 
-@celery.task(name="health_data_converter.convert_to_fhir")
+def convert_message(message, endpoint_url, max_retries, endpoint_type):
+    for attempt in range(max_retries):
+        try:
+            response = send_conversion_request(endpoint_url, message, attempt + 1, endpoint_type)
+            return json.loads(response.text)
+        except Exception as e:
+            log_message_cycle(
+                message['UUID'],
+                message.get('organization_uuid'),
+                "conversion_error",
+                message['OriginalDataType'],
+                {
+                    "endpoint_type": endpoint_type,
+                    "attempt": attempt + 1,
+                    "error": str(e),
+                    "error_type": type(e).__name__
+                },
+                "error"
+            )
+            if attempt == max_retries - 1:
+                raise
+
 def convert_to_fhir(app, message):
     start_time = time.time()
     app.logger.info(f"Starting conversion for message {message['uuid']}")
-    creation_timestamp = message['timestamp'].timestamp()
+    log_message_cycle(message['uuid'], message['organization_uuid'], "conversion_started", message['type'], {}, "in_progress")
 
-    api_urls = {
-        'HL7v2': app.config['HL7_TO_FHIR_API_URL'],
-        'Clinical Notes': app.config['NOTES_TO_FHIR_API_URL'],
-        'CCDA': app.config['CCDA_TO_FHIR_API_URL'],
-        'X12': app.config['X12_TO_FHIR_API_URL']
-    }
-
-    api_url = api_urls.get(message['type'])
-    if not api_url:
-        app.logger.error(f"Unsupported message type for conversion: {message['type']}")
-        return None
-
-    original_data_type = "HL7" if message['type'] == 'HL7v2' else message['type']
+    new_endpoint, current_endpoint = get_endpoint_config(message['type'])
 
     incoming_message = {
         "UUID": message['uuid'],
-        "CreationTimestamp": creation_timestamp,
-        "OriginalDataType": original_data_type,
-        "MessageBody": message['message']
+        "CreationTimestamp": message['timestamp'].timestamp(),
+        "OriginalDataType": message['type'],
+        "MessageBody": message['message'],
+        "organization_uuid": message['organization_uuid']
     }
 
-    app.logger.info(f"Sending request to {api_url}")
-    app.logger.debug(f"Request payload: {json.dumps(incoming_message)}")
-
     try:
-        conversion_start_time = time.time()
-        response = send_conversion_request(api_url, incoming_message)
-        api_response_time = time.time() - conversion_start_time
-        app.logger.info(f"API response time: {api_response_time:.2f} seconds")
-        
-        response_content = response.text
-        app.logger.debug(f"Raw API response: {response_content}")
+        if new_endpoint:
+            try:
+                outgoing_message = convert_message(incoming_message, new_endpoint, MAX_RETRY_ATTEMPTS_NEW, "new")
+            except Exception:
+                if not current_endpoint:
+                    raise
+                outgoing_message = convert_message(incoming_message, current_endpoint, MAX_RETRY_ATTEMPTS_CURRENT, "current")
+        elif current_endpoint:
+            outgoing_message = convert_message(incoming_message, current_endpoint, MAX_RETRY_ATTEMPTS_CURRENT, "current")
+        else:
+            raise ValueError(f"No valid endpoint configuration for message type: {message['type']}")
 
-        outgoing_message = parse_json_safely(response_content)
-        app.logger.debug(f"Parsed API response: {json.dumps(outgoing_message)}")
-
-        if not validate_api_response(app, outgoing_message):
+        if not validate_api_response(outgoing_message):
             raise ValueError("Invalid API response structure")
 
         conversion_time = time.time() - start_time
 
         app.logger.info(f"Conversion successful for message {message['uuid']}")
         app.logger.info(f"Total conversion time: {conversion_time:.2f} seconds")
+
+        log_message_cycle(message['uuid'], message['organization_uuid'], "conversion_completed", message['type'], 
+                          {"conversion_time": conversion_time}, "success")
 
         return {
             'fhir_content': json.loads(outgoing_message['MessageBody']),
@@ -102,168 +116,58 @@ def convert_to_fhir(app, message):
                 'conversion_time': conversion_time
             }
         }
-    except requests.exceptions.RequestException as e:
-        app.logger.error(f"Error converting {message['type']} message {message['uuid']} to FHIR: {str(e)}")
-        app.logger.error(f"Request payload: {json.dumps(incoming_message)}")
-        if hasattr(e, 'response') and e.response is not None:
-            app.logger.error(f"Response status code: {e.response.status_code}")
-            app.logger.error(f"Response content: {e.response.text}")
-        return None
-    except json.JSONDecodeError as e:
-        app.logger.error(f"Error decoding JSON for {message['type']} message {message['uuid']}: {str(e)}")
-        app.logger.error(f"Response content: {response_content}")
-        app.logger.error(f"Error at line {e.lineno}, column {e.colno}")
-        app.logger.error(f"Error context: {e.doc[max(0, e.pos-50):e.pos+50]}")
-        return None
     except Exception as e:
-        app.logger.error(f"Unexpected error processing {message['type']} message {message['uuid']}: {str(e)}")
+        app.logger.error(f"Error converting {message['type']} message {message['uuid']} to FHIR: {str(e)}")
         app.logger.error(f"Traceback: {traceback.format_exc()}")
+        log_message_cycle(message['uuid'], message['organization_uuid'], "conversion_error", message['type'], 
+                          {"error": str(e), "error_type": type(e).__name__}, "error")
         return None
 
-@celery.task(name="health_data_converter.process_message_type")
 def process_message_type(app, mongo, message_type):
-    if message_type == "HL7v2":
-        return process_hl7v2_messages(app, mongo)
-    else:
-        return process_other_message_type(app, mongo, message_type)
-
-@celery.task(name="health_data_converter.process_hl7v2_messages")
-def process_hl7v2_messages(app, mongo):
-    app.logger.info("Starting process_hl7v2_messages function")
+    app.logger.info(f"Starting process_{message_type}_messages function")
     query = {
-        "type": "HL7v2",
+        "type": message_type,
         "$or": [
             {"conversion_status": "pending"},
-            {"conversion_status": "failed", "retry_count": {"$lt": MAX_RETRY_ATTEMPTS}}
+            {"conversion_status": "failed", "retry_count": {"$lt": MAX_RETRY_ATTEMPTS_CURRENT}}
         ],
         "organization_uuid": {"$exists": True}
     }
     
     pending_messages = list(mongo.db.messages.find(query).limit(BATCH_SIZE))
-    app.logger.info(f"Found {len(pending_messages)} HL7v2 messages to process")
+    app.logger.info(f"Found {len(pending_messages)} {message_type} messages to process")
     
-    for message in pending_messages:
-        message_id = str(message['_id'])
-        if not celery.AsyncResult(message_id).state:
-            app.logger.info(f"Queueing HL7v2 message {message_id} for conversion")
-            convert_to_fhir.apply_async(args=[app, message], task_id=message_id, queue='hl7v2_conversion')
-            mongo.db.messages.update_one(
-                {"_id": message['_id']},
-                {"$set": {"conversion_status": "queued"}}
-            )
-        else:
-            app.logger.info(f"HL7v2 message {message_id} already queued for conversion")
-    
-    app.logger.info(f"Processed {len(pending_messages)} HL7v2 messages")
-    return len(pending_messages)
-@celery.task(name="health_data_converter.process_other_message_type")
-def process_other_message_type(app, mongo, message_type):
-    query = {
-        "type": message_type,
-        "$or": [
-            {"conversion_status": "pending"},
-            {"conversion_status": "failed", "retry_count": {"$lt": MAX_RETRY_ATTEMPTS}},
-            {"conversion_status": "processing", "last_processing_start": {"$lt": datetime.utcnow() - timedelta(seconds=PROCESSING_TIMEOUT)}}
-        ]
-    }
-    
-    sort_order = [("conversion_status", 1), ("timestamp", 1)]
-    
-    pending_messages = list(mongo.db.messages.find(query).sort(sort_order).limit(BATCH_SIZE))
-
     processed_count = 0
-    
     for message in pending_messages:
-        mongo.db.messages.update_one(
-            {"_id": message['_id']},
-            {"$set": {"conversion_status": "processing", "last_processing_start": datetime.utcnow()}}
-        )
-
-        app.logger.info(f"Processing message {message['uuid']} (current status: processing)")
-        result = convert_to_fhir.delay(app, message)
+        result = convert_to_fhir(app, message)
         if result:
-            fhir_message = {
-                "original_message_uuid": message['uuid'],
-                "organization_uuid": message['organization_uuid'],
-                "fhir_content": result['fhir_content'],
-                "conversion_metadata": result['conversion_metadata']
-            }
-            
             mongo.db.fhir_messages.update_one(
-                {
-                    "original_message_uuid": message['uuid'],
-                    "organization_uuid": message['organization_uuid']
-                },
-                {"$set": fhir_message},
+                {"original_message_uuid": message['uuid'], "organization_uuid": message['organization_uuid']},
+                {"$set": result},
                 upsert=True
             )
-            
             mongo.db.messages.update_one(
                 {"_id": message['_id']},
-                {
-                    "$set": {
-                        "conversion_status": "completed",
-                        "retry_count": 0,
-                        "last_converted_at": datetime.utcnow(),
-                        "error_message": None
-                    }
-                }
+                {"$set": {"conversion_status": "completed", "retry_count": 0}}
             )
-            app.logger.info(f"Message {message['uuid']} converted successfully and marked as completed")
             processed_count += 1
         else:
-            error_message = f"Conversion failed for message {message['uuid']}"
-            app.logger.info(error_message)
-            update_failed_message(mongo, message, error_message)
-        
-        time.sleep(1)  # Add a 1-second delay between messages
+            retry_count = message.get('retry_count', 0) + 1
+            mongo.db.messages.update_one(
+                {"_id": message['_id']},
+                {"$set": {"conversion_status": "failed", "retry_count": retry_count}}
+            )
     
+    app.logger.info(f"Processed {processed_count} {message_type} messages")
     return processed_count
 
-def update_failed_message(mongo, message, error_message):
-    retry_count = message.get('retry_count', 0) + 1
-    next_retry_time = datetime.utcnow() + timedelta(seconds=RETRY_DELAY)
-    
-    update_data = {
-        "conversion_status": "failed",
-        "retry_count": retry_count,
-        "next_retry_time": next_retry_time,
-        "error_message": error_message,
-        "last_failed_at": datetime.utcnow()
-    }
-    
-    if retry_count >= MAX_RETRY_ATTEMPTS:
-        update_data["conversion_status"] = "error"
-        update_data["error_message"] += " (Max retry attempts reached)"
-    
-    mongo.db.messages.update_one(
-        {"_id": message['_id']},
-        {"$set": update_data}
-    )
-
-@celery.task(name="health_data_converter.process_pending_conversions")
 def process_pending_conversions(app, mongo):
-    message_types = ["Clinical Notes", "CCDA", "X12"]
+    message_types = ["HL7v2", "Clinical Notes", "CCDA", "X12"]
     total_processed = 0
     
     for message_type in message_types:
-        processed_count = process_message_type.delay(app, mongo, message_type)
+        processed_count = process_message_type(app, mongo, message_type)
         total_processed += processed_count
-    
-    return total_processed
-
-@celery.task(name="health_data_converter.scheduled_process_pending_conversions")
-def scheduled_process_pending_conversions(app, mongo):
-    app.logger.info("Starting FHIR conversion process for non-HL7v2 message types")
-    
-    message_types = ["Clinical Notes", "CCDA", "X12"]
-    total_processed = 0
-    
-    for message_type in message_types:
-        processed_count = process_message_type.delay(app, mongo, message_type)
-        total_processed += processed_count
-    
-    app.logger.info(f"Completed FHIR conversion process. Processed {total_processed} non-HL7v2 messages.")
     
     return total_processed
 
@@ -305,8 +209,6 @@ def get_conversion_queue_status(app, mongo):
         "processing": processing_count,
         "total": pending_count + failed_count + completed_count + error_count + processing_count
     }
-
-@celery.task(name="health_data_converter.reset_failed_conversions")
 def reset_failed_conversions(app, mongo):
     result = mongo.db.messages.update_many(
         {"conversion_status": {"$in": ["failed", "error"]}},
@@ -318,7 +220,6 @@ def reset_failed_conversions(app, mongo):
         "message": f"Reset {result.modified_count} failed and error conversions to pending status."
     }
 
-@celery.task(name="health_data_converter.get_conversion_errors")
 def get_conversion_errors(app, mongo, limit=100):
     errors = list(mongo.db.messages.find(
         {"conversion_status": {"$in": ["failed", "error"]}},
@@ -327,7 +228,6 @@ def get_conversion_errors(app, mongo, limit=100):
     
     return errors
 
-@celery.task(name="health_data_converter.cleanup_stuck_messages")
 def cleanup_stuck_messages(app, mongo):
     timeout = datetime.utcnow() - timedelta(seconds=PROCESSING_TIMEOUT)
     result = mongo.db.messages.update_many(
@@ -360,7 +260,6 @@ def initialize_database_indexes(app, mongo):
 
         app.logger.info("Database indexes initialized successfully.")
 
-@celery.task(name="health_data_converter.log_conversion_metrics")
 def log_conversion_metrics(app, mongo):
     stats = get_conversion_statistics(app, mongo)
     queue_status = get_conversion_queue_status(app, mongo)
@@ -369,10 +268,64 @@ def log_conversion_metrics(app, mongo):
     app.logger.info(f"Conversion Statistics: {json.dumps(stats)}")
 
 def init_health_data_converter(app, mongo):
-    app.logger.info("Initializing health data converter")
-    initialize_database_indexes(app, mongo)
+    with app.app_context():
+        app.logger.info("Initializing health data converter")
+        initialize_database_indexes(app, mongo)
+        
+        # Verify and log endpoint configurations
+        message_types = ["HL7v2", "Clinical Notes", "CCDA", "X12"]
+        for message_type in message_types:
+            new_endpoint, current_endpoint = get_endpoint_config(message_type)
+            app.logger.info(f"{message_type} configuration:")
+            app.logger.info(f"  New endpoint: {new_endpoint}")
+            app.logger.info(f"  Current endpoint: {current_endpoint}")
+        
+        app.logger.info("Health Data Converter initialized successfully")
+
+def parse_pasted_message(message_id):
+    from app.services.file_parser_service import FileParserService
     
-    app.logger.info("Health Data Converter initialized successfully")
+    message = mongo.db.messages.find_one({"_id": ObjectId(message_id)})
+    if not message:
+        return
+
+    try:
+        extracted_text = message['message']
+        detected_type, confidence = FileParserService.analyze_content(extracted_text)
+
+        if detected_type != message['type']:
+            log_message_cycle(message['uuid'], message['organization_uuid'], "type_mismatch", message['type'], 
+                              {"detected_type": detected_type, "confidence": confidence}, "info")
+
+        parsed_content = FileParserService.parse_file(extracted_text)
+
+        mongo.db.messages.update_one(
+            {"_id": ObjectId(message_id)},
+            {
+                "$set": {
+                    "type": detected_type,
+                    "parsed": True,
+                    "parsing_status": "completed",
+                    "message": parsed_content,
+                    "content_analysis": {
+                        "detected_type": detected_type,
+                        "confidence": confidence
+                    },
+                    "conversion_status": "pending"  # Change status to pending after parsing
+                }
+            }
+        )
+
+        log_message_cycle(message['uuid'], message['organization_uuid'], "parsing_completed", detected_type, 
+                          {"confidence": confidence}, "success")
+
+    except Exception as e:
+        log_message_cycle(message['uuid'], message['organization_uuid'], "parsing_failed", message['type'], 
+                          {"error": str(e)}, "error")
+        mongo.db.messages.update_one(
+            {"_id": ObjectId(message_id)},
+            {"$set": {"parsing_status": "failed", "error_message": str(e), "conversion_status": "failed"}}
+        )
 
 if __name__ == "__main__":
     from flask import Flask

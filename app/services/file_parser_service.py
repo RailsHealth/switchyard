@@ -6,7 +6,8 @@ from app.extensions import mongo, celery
 from datetime import datetime
 from bson import ObjectId
 from io import StringIO
-from app.celery_app import celery
+from app import celery
+from app.utils.logging_utils import log_message_cycle
 
 class FileParserService:
     @staticmethod
@@ -126,34 +127,31 @@ class FileParserService:
         try:
             extracted_text = FileParserService.extract_text_from_file(file_path)
             
-            # Store extracted text in temp collection
-            temp_text_id = mongo.db.temp_extracted_texts.insert_one({
-                "message_id": message_id,
-                "organization_uuid": organization_uuid,
-                "extracted_text": extracted_text
-            }).inserted_id
-
             # Analyze content
             detected_type, confidence = FileParserService.analyze_content(extracted_text)
 
-            if detected_type != initial_type:
-                FileParserService._log_type_mismatch(message_id, initial_type, detected_type, confidence, organization_uuid)
-                # Update stream type if this is the first file
-                FileParserService._update_stream_type_if_first_file(message['stream_uuid'], detected_type, organization_uuid)
+            # Update message type if confidence is above 0.8
+            update_type = confidence > 0.8 and detected_type != initial_type
+            final_type = detected_type if update_type else initial_type
 
-            if detected_type == 'CCDA':
+            if update_type:
+                FileParserService._log_type_mismatch(message_id, initial_type, detected_type, confidence, organization_uuid)
+                log_message_cycle(message['uuid'], organization_uuid, "message_type_updated", initial_type,
+                                  {"new_type": detected_type, "confidence": confidence}, "info")
+
+            if final_type == 'CCDA':
                 parsed_content = FileParserService.parse_ccda(extracted_text)
                 parsing_status = 'completed' if 'error' not in parsed_content else 'failed'
-            elif detected_type == 'X12':
+            elif final_type == 'X12':
                 parsed_content = FileParserService.parse_x12(extracted_text)
                 parsing_status = 'completed' if 'error' not in parsed_content else 'failed'
-            elif detected_type == 'Clinical Notes':
+            elif final_type == 'Clinical Notes':
                 parsed_content = extracted_text
                 parsing_status = 'completed'
             else:
                 parsed_content = extracted_text
                 parsing_status = 'completed'
-                detected_type = 'RAW'
+                final_type = 'RAW'
 
             # Update message with parsed content and status
             mongo.db.messages.update_one(
@@ -162,7 +160,7 @@ class FileParserService:
                     "$set": {
                         "message": parsed_content,
                         "parsing_status": parsing_status,
-                        "type": detected_type,
+                        "type": final_type,
                         "parsed_at": datetime.utcnow(),
                         "conversion_status": "pending" if parsing_status == 'completed' else "failed",
                         "content_analysis": {
@@ -173,8 +171,8 @@ class FileParserService:
                 }
             )
 
-            # Remove temporary extracted text
-            mongo.db.temp_extracted_texts.delete_one({"_id": temp_text_id})
+            log_message_cycle(message['uuid'], organization_uuid, "parsing_completed", final_type,
+                              {"confidence": confidence, "initial_type": initial_type}, "success")
 
         except Exception as e:
             error_message = str(e)
@@ -193,6 +191,8 @@ class FileParserService:
                 }
             )
             FileParserService._log_error(message_id, str(e), organization_uuid)
+            log_message_cycle(message['uuid'], organization_uuid, "parsing_failed", initial_type,
+                              {"error": str(e)}, "error")
 
     @staticmethod
     def _log_type_mismatch(message_id, initial_type, detected_type, confidence, organization_uuid):
@@ -206,23 +206,6 @@ class FileParserService:
             "timestamp": datetime.utcnow()
         }
         mongo.db.parsing_logs.insert_one(log_entry)
-
-    @staticmethod
-    def _update_stream_type_if_first_file(stream_uuid, detected_type, organization_uuid):
-        stream = mongo.db.streams.find_one({"uuid": stream_uuid, "organization_uuid": organization_uuid})
-        if stream and stream.get('files_processed', 0) == 0:
-            mongo.db.streams.update_one(
-                {"uuid": stream_uuid, "organization_uuid": organization_uuid},
-                {
-                    "$set": {"message_type": detected_type},
-                    "$inc": {"files_processed": 1}
-                }
-            )
-        else:
-            mongo.db.streams.update_one(
-                {"uuid": stream_uuid, "organization_uuid": organization_uuid},
-                {"$inc": {"files_processed": 1}}
-            )
 
     @staticmethod
     def _log_error(message_id, error_message, organization_uuid):
@@ -275,3 +258,19 @@ class FileParserService:
                 return FileParserService.parse_x12(f.read())
         else:
             raise ValueError(f"Unsupported file type: {file_type}")
+
+    @staticmethod
+    def parse_pasted_message(message_content):
+        detected_type, confidence = FileParserService.analyze_content(message_content)
+        
+        if detected_type == 'CCDA':
+            parsed_content = FileParserService.parse_ccda(message_content)
+        elif detected_type == 'X12':
+            parsed_content = FileParserService.parse_x12(message_content)
+        elif detected_type == 'Clinical Notes':
+            parsed_content = message_content
+        else:
+            parsed_content = message_content
+            detected_type = 'RAW'
+        
+        return detected_type, confidence, parsed_content

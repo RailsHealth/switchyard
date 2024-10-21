@@ -1,8 +1,10 @@
+from flask import request, abort
 from flask_admin import Admin
 from flask_admin.contrib.pymongo import ModelView
 from wtforms import Form, StringField, IntegerField, BooleanField, DateTimeField, TextAreaField, FloatField
 from wtforms.validators import Optional
 from flask_admin.contrib.pymongo.filters import FilterEqual, FilterLike
+from flask_login import current_user
 import json
 from .extensions import mongo
 
@@ -85,6 +87,9 @@ class CustomModelView(ModelView):
             return False
         return True
 
+    def is_accessible(self):
+        return current_user.is_authenticated and current_user.email in admin.app.config['ADMIN_PANEL_EMAILS']
+
 class FHIRMessageView(CustomModelView):
     def __init__(self, collection, endpoint, *args, **kwargs):
         columns = ['original_message_uuid', 'fhir_content', 'conversion_metadata.conversion_time']
@@ -123,7 +128,6 @@ class FHIRMessageView(CustomModelView):
             if 'conversion_metadata' not in model:
                 model['conversion_metadata'] = {}
             model['conversion_metadata']['conversion_time'] = form.data['conversion_time']
-
 
 def init_admin(app):
     if not admin.app:  # Only initialize if it hasn't been done already
@@ -165,5 +169,20 @@ def init_admin(app):
             endpoint='fhir_messages_view',
             name='FHIR Messages'
         ))
+        admin.add_view(CustomModelView(
+            mongo.db.users, 
+            endpoint='users_view',
+            name='Users',
+            columns=['email', 'name', 'roles', 'organizations']
+        ))
+
+        # Restrict access to admin panel
+        @app.before_request
+        def restrict_admin_access():
+            if request.path.startswith(admin.url) and (
+                not current_user.is_authenticated or
+                current_user.email not in app.config['ADMIN_PANEL_EMAILS']
+            ):
+                abort(403)
 
     return admin

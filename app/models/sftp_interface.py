@@ -3,17 +3,20 @@ import os
 import uuid
 from datetime import datetime
 import logging
-from app.extensions import mongo
-from config import Config
 import time
 import re
-from app.models.base_interface import BaseInterface
 import threading
+from app.extensions import mongo
+from config import Config
+from app.models.base_interface import BaseInterface
+from app.utils.logging_utils import log_message_cycle
+from app.tasks import parse_pasted_message
+from flask import current_app
 
 class SFTPInterface(BaseInterface):
-    def __init__(self, stream_uuid, host, port, username, password=None, private_key=None, remote_path=None, file_pattern=None, fetch_interval=None):
+    def __init__(self, stream_uuid, host, port, username, password=None, private_key=None, remote_path=None, file_pattern=None, fetch_interval=None, organization_uuid=None):
         super().__init__(stream_uuid)
-        elf.organization_uuid = organization_uuid
+        self.organization_uuid = organization_uuid
         self.host = host
         self.port = port
         self.username = username
@@ -29,6 +32,9 @@ class SFTPInterface(BaseInterface):
         self.fetch_thread = None
         self.stop_event = threading.Event()
 
+        logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+        self.logger = logging.getLogger(f'SFTPInterface-{stream_uuid}')
+
     def connect(self):
         retry_count = 0
         while retry_count < Config.SFTP_RETRY_ATTEMPTS:
@@ -41,9 +47,13 @@ class SFTPInterface(BaseInterface):
                     self.transport.connect(username=self.username, password=self.password)
                 self.sftp = paramiko.SFTPClient.from_transport(self.transport)
                 self.logger.info(f"Connected to SFTP server: {self.host}")
+                log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "sftp_connected", "SFTP", 
+                                  {"host": self.host}, "success")
                 return True
             except Exception as e:
                 self.logger.error(f"SFTP connection error (attempt {retry_count + 1}): {str(e)}")
+                log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "sftp_connection_failed", "SFTP", 
+                                  {"host": self.host, "attempt": retry_count + 1, "error": str(e)}, "error")
                 retry_count += 1
                 time.sleep(Config.SFTP_RETRY_DELAY)
         return False
@@ -54,6 +64,8 @@ class SFTPInterface(BaseInterface):
         if self.transport:
             self.transport.close()
         self.logger.info(f"Disconnected from SFTP server: {self.host}")
+        log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "sftp_disconnected", "SFTP", 
+                          {"host": self.host}, "success")
 
     def start_fetching(self):
         if not self.is_fetching:
@@ -62,7 +74,8 @@ class SFTPInterface(BaseInterface):
             self.fetch_thread = threading.Thread(target=self._fetch_loop)
             self.fetch_thread.start()
             self.logger.info(f"Started fetching files from SFTP server: {self.host}")
-            self._store_log(logging.INFO, f"Started fetching files from SFTP server: {self.host}")
+            log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "sftp_fetch_started", "SFTP", 
+                              {"host": self.host}, "success")
 
     def stop_fetching(self):
         if self.is_fetching:
@@ -71,7 +84,8 @@ class SFTPInterface(BaseInterface):
             if self.fetch_thread:
                 self.fetch_thread.join(timeout=30)  # Wait for up to 30 seconds for the thread to finish
             self.logger.info(f"Stopped fetching files from SFTP server: {self.host}")
-            self._store_log(logging.INFO, f"Stopped fetching files from SFTP server: {self.host}")
+            log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "sftp_fetch_stopped", "SFTP", 
+                              {"host": self.host}, "success")
 
     def _fetch_loop(self):
         while not self.stop_event.is_set():
@@ -116,16 +130,21 @@ class SFTPInterface(BaseInterface):
                     "parsed": False,
                     "type": self._get_message_type(),
                     "parsing_status": "pending",
-                    "conversion_status": "pending"
+                    "conversion_status": "pending_parsing"
                 }
-                mongo.db.messages.insert_one(message)
+                result = mongo.db.messages.insert_one(message)
 
                 self.logger.info(f"File {filename} downloaded and message created")
-                self._store_log(logging.INFO, f"File {filename} downloaded and message created")
+                log_message_cycle(message_uuid, self.organization_uuid, "file_downloaded", message['type'], 
+                                  {"filename": filename, "mongodb_id": str(result.inserted_id)}, "success")
+
+                # Queue the message for parsing
+                self._queue_message_for_parsing(result.inserted_id)
 
         except Exception as e:
             self.logger.error(f"Error fetching files: {str(e)}")
-            self._store_log(logging.ERROR, f"Error fetching files: {str(e)}")
+            log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "fetch_error", "SFTP", 
+                              {"error": str(e)}, "error")
         finally:
             self.disconnect()
 
@@ -133,30 +152,35 @@ class SFTPInterface(BaseInterface):
         stream = mongo.db.streams.find_one({"uuid": self.stream_uuid, "organization_uuid": self.organization_uuid})
         return stream.get('message_type', 'Unknown')
 
-    def _store_log(self, level, message):
-        log_entry = {
-            "stream_uuid": self.stream_uuid,
-            "organization_uuid": self.organization_uuid,
-            "level": logging.getLevelName(level),
-            "message": message,
-            "timestamp": datetime.utcnow()
-        }
+    def _queue_message_for_parsing(self, message_id):
         try:
-            mongo.db.logs.insert_one(log_entry)
+            task = parse_pasted_message.apply_async(args=[str(message_id)], queue='file_parsing')
+            self.logger.info(f"Successfully queued message {message_id} for parsing. Task ID: {task.id}")
+            log_message_cycle(str(message_id), self.organization_uuid, "queued_for_parsing", "SFTP", 
+                              {"task_id": task.id}, "success")
         except Exception as e:
-            self.logger.error(f"Error while logging to MongoDB: {e}")
+            self.logger.error(f"Failed to queue message {message_id} for parsing: {str(e)}")
+            log_message_cycle(str(message_id), self.organization_uuid, "queue_failed", "SFTP", 
+                              {"error": str(e)}, "error")
 
     def update_fetch_interval(self, new_interval):
         self.fetch_interval = new_interval
         self.logger.info(f"Updated fetch interval to {new_interval} seconds")
-        self._store_log(logging.INFO, f"Updated fetch interval to {new_interval} seconds")
+        log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "fetch_interval_updated", "SFTP", 
+                          {"new_interval": new_interval}, "success")
 
     def test_connection(self):
         try:
             if self.connect():
                 self.disconnect()
+                log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "connection_test", "SFTP", 
+                                  {"host": self.host}, "success")
                 return True, "Connection successful"
             else:
+                log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "connection_test", "SFTP", 
+                                  {"host": self.host}, "failed")
                 return False, "Failed to connect to SFTP server"
         except Exception as e:
+            log_message_cycle(str(uuid.uuid4()), self.organization_uuid, "connection_test", "SFTP", 
+                              {"host": self.host, "error": str(e)}, "error")
             return False, f"Error testing connection: {str(e)}"
