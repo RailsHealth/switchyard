@@ -10,10 +10,6 @@
         </div>
 
         <div class="view-streams-actions">
-            <div class="filter-by">
-                Filter by: All Active Inactive Deleted
-            </div>
-
             {% if g.user_role == 'admin' %}
             <a href="{{ url_for('streams.create_stream') }}" class="btn btn-primary new-stream-btn">+ New Stream</a>
             {% endif %}

@@ -1,56 +1,68 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Create Organisation - Switchyard</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='images/favicon.png') }}">
+    <link rel="icon" href="{{ url_for('static', filename='images/favicon.png') }}" type="image/png">
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap">
 </head>
 <body>
+    <div class="top-nav">
+        <div class="logo">
+            <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="Rails Health Logo">
+            <span>RAILS HEALTH</span>
+        </div>
+    </div>
     <div class="create-org-container">
-        <div class="create-org-content">
-            <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="Rails Health Logo" class="top-logo">
+
             <img src="{{ url_for('static', filename='images/switchyard_logo.png') }}" alt="Switchyard Logo" class="main-logo">
-    
-            <h1>Switchyard</h1>
-            <h2>everything to FHIR</h2>
-    
+
             <h3>Create Organisation</h3>
-            <p>Create your organisation and add users.<br>You have admin rights by default.</p>
-    
+
+            <p>Create your organisation and add users.<br>
+            You have admin rights by default.</p>
+
             <form method="POST" action="{{ url_for('auth.create_organization') }}">
                 {{ form.csrf_token }}
+
                 <div class="form-group">
-                    <label for="org_type">Type of Organisation:</label>
-                    <select id="org_type" name="org_type" class="form-control" required>
-                        <option value="">Select organization type</option>
+                    <input type="text" 
+                           class="form-control" 
+                           name="name" 
+                           placeholder="Name of Organisation" 
+                           required>
+                </div>
+
+                <div class="form-group">
+                    <input type="url" 
+                           class="form-control" 
+                           name="website" 
+                           placeholder="Website (optional)">
+                </div>
+
+                <div class="form-group">
+                    <input type="email" 
+                           class="form-control" 
+                           name="email" 
+                           placeholder="Contact Email ID">
+                </div>
+
+                <div class="form-group">
+                    <select name="type" class="form-control" required>
+                        <option value="" disabled selected>Type of Organisation (select from dropdown)</option>
                         {% for org_type in config['ORGANIZATION_TYPES'] %}
                             <option value="{{ org_type }}">{{ org_type }}</option>
                         {% endfor %}
                     </select>
                 </div>
-                <div class="form-group">
-                    <label for="name">Organization Name:</label>
-                    <input type="text" id="name" name="name" class="form-control" required>
-                </div>
-                <button type="submit" class="btn btn-primary">Finish</button>
-            </form>
-        </div>
-        <p class="disclaimer">This is an early experimental version. Please only use deidentified data.</p>
-    </div>
-    <script>
-        // Basic form validation
-        document.querySelector('form').addEventListener('submit', function(e) {
-            var name = document.querySelector('input[name="name"]').value;
-            var email = document.querySelector('input[name="contact_email"]').value;
-            var type = document.querySelector('select[name="type"]').value;
 
-            if (!name || !email || !type) {
-                e.preventDefault();
-                alert('Please fill in all required fields.');
-            }
-        });
-    </script>
+                <div class="form-group">
+                    <button type="Save" class="btn btn-primary">Finish</button>
+                </div>
+            </form>
+
+            <div class="footer">This is an early experimental version. Please only use deidentified data.</div>
+        </div>
+    </div>
 </body>
 </html>

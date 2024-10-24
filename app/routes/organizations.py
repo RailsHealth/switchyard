@@ -16,7 +16,7 @@ bp = Blueprint('organizations', __name__)
 
 class CreateOrganizationForm(FlaskForm):
     name = StringField('Organization Name', validators=[DataRequired()])
-    org_type = SelectField('Type of Organisation', choices=[('healthcare', 'Healthcare'), ('insurance', 'Insurance'), ('other', 'Other')], validators=[DataRequired()])
+    org_type = SelectField('Type of Organisation', validators=[DataRequired()])
     website = StringField('Website', validators=[Optional(), URL()])
     email = StringField('Contact Email', validators=[DataRequired(), Email()])
     address = TextAreaField('Address', validators=[Optional()])
@@ -26,6 +26,7 @@ class CreateOrganizationForm(FlaskForm):
 @login_required
 def create_new_organization():
     form = CreateOrganizationForm()
+    form.org_type.choices = [(t, t) for t in current_app.config['ORGANIZATION_TYPES']]
     if form.validate_on_submit():
         try:
             org_uuid = Organization.create(
