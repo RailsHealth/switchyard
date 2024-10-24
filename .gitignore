@@ -139,3 +139,8 @@ dmypy.json
 cython_debug/
 
 # Custom - add any project-specific files or directories here
+
+celerybeat-schedule.db
+dump.rdb
+production.py
+run.py
