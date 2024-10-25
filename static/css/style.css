@@ -425,7 +425,7 @@ nav a img {
 .btn-success {
     background-color: #fff;
     color: #000;
-    border: 1px solid #000;
+    border: 1px solid #000 !important;
 }
 
 .btn-outline {
@@ -680,65 +680,320 @@ form h2 {
     flex-grow: 1;
 }
 
-/* Logs and Messages Styles */
-.log-card, .message-card {
-    background-color: #fff;
-    border: 1px solid #e0e0e0;
-    border-radius: 8px;
+/* Log and Message Shared Styles */
+
+/* Header Styles */
+.header-with-actions {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
     margin-bottom: 10px;
 }
 
-.log-card .card-header, .message-card .card-header {
-    background-color: #f8f9fa;
-    padding: 10px 15px;
-    border-bottom: 1px solid #e0e0e0;
+.header-with-actions h1 {
+    font-size: 24px;
+    margin: 0;
+    font-weight: 600;
+}
+
+.header-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Filter and Pagination Layout */
+.filters-and-pagination {
     display: flex;
     justify-content: space-between;
-    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 16px;
+    width: 100%;
 }
 
-.log-time, .message-time {
-    font-weight: bold;
+.filter-by {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    flex-wrap: nowrap;
 }
 
-.log-stream, .message-stream, .log-type, .message-type {
-    color: #666;
-    margin-left: 10px;
-}
-
-.log-content, .message-content {
-    padding: 15px;
-    white-space: pre-wrap;
-    word-break: break-word;
-    max-height: 150px;
-    overflow-y: auto;
-}
-
-.date-header {
-    font-size: 18px;
-    font-weight: bold;
-    margin-top: 30px;
-    margin-bottom: 15px;
-    border-bottom: 1px solid #e0e0e0;
-    padding-bottom: 5px;
-}
-
-.truncation-notice {
-    font-size: 14px;
-    color: #007bff;
+/* Select Boxes */
+.form-select {
+    padding: 6px 12px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+    font-size: 13px;
+    min-width: 160px;
+    background-color: white;
     cursor: pointer;
-    margin-top: 5px;
-    text-align: right;
-    margin-right: 15px;
+    height: 32px;
+}
+
+/* Card Styles */
+.log-card, .message-card {
+    margin-bottom: 6px;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    background-color: #fff;
+    transition: all 0.2s ease;
 }
 
 .message-card {
     cursor: pointer;
-    transition: background-color 0.3s ease;
 }
 
 .message-card:hover {
+    border-color: #0066cc;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+/* Card Header */
+.card-header {
+    padding: 4px 12px;
     background-color: #f8f9fa;
+    border-bottom: 1px solid #e0e0e0;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    min-height: 28px;
+}
+
+/* Time Display */
+.log-time, .message-time {
+    font-size: 12px;
+    font-weight: bold;
+    color: #666;
+    flex-shrink: 0;
+}
+
+/* Meta Information */
+.log-meta, .messagelist-meta {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    background: none;
+}
+
+/* Type Labels */
+.log-stream.compact,
+.log-type.compact,
+.log-category.compact,
+.message-stream.compact,
+.message-type.compact,
+.message-status.compact {
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.2;
+}
+
+/* Label Colors */
+.log-stream.compact, .message-stream.compact {
+    background-color: #e3f2fd;
+}
+
+.log-type.compact, .message-type.compact {
+    background-color: #f3e5f5;
+}
+
+.log-category.compact {
+    background-color: #fff3e0;
+}
+
+.message-status.compact {
+    background-color: #ffeaec;
+}
+
+/* Card Body */
+.card-body {
+    padding: 8px 12px;
+}
+
+/* Message Content */
+.log-content, .message-content {
+    font-family: 'Menlo', 'Monaco', 'Courier New', monospace;
+    font-size: 13px;
+    line-height: 1.4;
+    margin: 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+/* Validation Specific Styles */
+.validation-content {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.validation-status {
+    font-size: 13px;
+    color: #666;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.validation-label {
+    font-weight: 500;
+    color: #666;
+}
+
+.validation-value {
+    color: #333;
+}
+
+/* Date Headers */
+.date-header {
+    font-size: 16px;
+    font-weight: 600;
+    color: #333;
+    margin: 24px 0 12px 0;
+    padding-bottom: 6px;
+    border-bottom: 1px solid #e0e0e0;
+}
+
+/* Truncation */
+.truncated {
+    max-height: 200px;
+    overflow: hidden;
+    position: relative;
+}
+
+.truncation-notice {
+    color: #0066cc;
+    font-size: 11px;
+    cursor: pointer;
+    margin-top: 4px;
+    text-align: right;
+    padding: 2px 0;
+}
+
+.truncation-notice:hover {
+    text-decoration: underline;
+}
+
+/* Parsing Details */
+.log-details {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid #e0e0e0;
+    font-size: 12px;
+}
+
+.detail-label {
+    font-weight: 500;
+    color: #666;
+    margin-right: 4px;
+}
+
+.mismatch-details {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+/* Pagination */
+.pagination {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.page-info {
+    font-size: 13px;
+    color: #666;
+}
+
+.page-link {
+    font-size: 13px;
+    color: #0066cc;
+    text-decoration: none;
+    padding: 4px 8px;
+    border-radius: 3px;
+}
+
+.page-link:hover {
+    background-color: #f0f7ff;
+}
+
+.page-link.disabled {
+    color: #6c757d;
+    pointer-events: none;
+    opacity: 0.6;
+}
+
+/* Loading State */
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.7);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #000;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Empty State */
+#empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    background-color: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 4px;
+    color: #666;
+    font-size: 14px;
+}
+
+/* Mobile Responsiveness */
+@media (max-width: 768px) {
+    .filters-and-pagination {
+        flex-direction: column;
+        gap: 12px;
+    }
+
+    .filter-by {
+        flex-direction: column;
+        width: 100%;
+    }
+
+    .form-select {
+        width: 100%;
+    }
+
+    .pagination {
+        justify-content: center;
+        width: 100%;
+    }
+
+    .card-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        padding: 8px 12px;
+    }
+
+    .log-meta, .message-meta {
+        flex-wrap: wrap;
+    }
 }
 
 /* FHIR-specific Styles */

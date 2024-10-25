@@ -1,11 +1,54 @@
 {% extends "base.html" %}
 {% block title %}Logs - Rails Health Interface{% endblock %}
+
+{% block head %}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.4/moment-with-locales.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/moment-timezone/0.5.43/moment-timezone-with-data.min.js"></script>
+<style>
+.loading-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(255, 255, 255, 0.7);
+    display: none;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid #f3f3f3;
+    border-top: 3px solid #000;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+</style>
+{% endblock %}
+
 {% block content %}
+<div id="loadingOverlay" class="loading-overlay">
+    <div class="spinner"></div>
+</div>
 
 <div class="main-content">
     <div class="view-logs-container">
         <div class="view-logs-header">
-            <h1>Logs</h1>
+            <div class="header-with-actions">
+                <h1>Logs</h1>
+                <a href="{{ url_for('logs.download_logs', stream_uuid=selected_stream_uuid, type=log_type) }}" 
+                   class="btn btn-secondary btn-sm">
+                    Download Logs
+                </a>
+            </div>
             <p>View logs for {{ g.organization['name'] }}</p>
         </div>
 
@@ -13,65 +56,80 @@
             <div class="logs-actions">
                 <div class="filters-and-pagination">
                     <div class="filter-by">
-                        <label for="stream-filter">Filter by Stream:</label>
-                        <select id="stream-filter">
+                        <select id="streamFilter" onchange="updateFilters()" class="form-select">
                             <option value="">All Streams</option>
                             {% for stream in streams %}
-                                <option value="{{ stream.uuid }}" {% if selected_stream_uuid == stream.uuid %}selected{% endif %}>{{ stream.name }}</option>
+                                <option value="{{ stream.uuid }}" {% if selected_stream_uuid == stream.uuid %}selected{% endif %}>
+                                    {{ stream.name }}-{{ stream.message_type }}
+                                </option>
                             {% endfor %}
                         </select>
 
-                        <label for="type-filter">Filter by Type:</label>
-                        <select id="type-filter">
-                            <option value="all" {% if log_type == 'all' %}selected{% endif %}>All Types</option>
+                        <select id="typeFilter" onchange="updateFilters()" class="form-select">
+                            <option value="all">All Types</option>
                             {% for type in log_types %}
-                                <option value="{{ type }}" {% if log_type == type %}selected{% endif %}>{{ type }}</option>
+                                <option value="{{ type }}" {% if log_type == type %}selected{% endif %}>
+                                    {{ type }}
+                                </option>
                             {% endfor %}
                         </select>
-                    </div>
 
-                    {% if total_pages > 0 %}
-                        <div class="pagination">
-                            <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
-                            {% if page > 1 %}
-                                <a href="{{ url_for('logs.view_logs', page=page-1, stream_uuid=selected_stream_uuid, type=log_type) }}" class="page-link">Previous</a>
-                            {% endif %}
-                            {% if page < total_pages %}
-                                <a href="{{ url_for('logs.view_logs', page=page+1, stream_uuid=selected_stream_uuid, type=log_type) }}" class="page-link">Next</a>
-                            {% endif %}
-                        </div>
-                    {% endif %}
+                        <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+                        {% if page > 1 %}
+                            <a href="javascript:void(0)" onclick="changePage({{ page - 1 }})" class="page-link">Previous</a>
+                        {% endif %}
+                        {% if page < total_pages %}
+                            <a href="javascript:void(0)" onclick="changePage({{ page + 1 }})" class="page-link">Next</a>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
 
             <div id="logs-list">
                 {% if grouped_logs %}
                     {% for date, logs in grouped_logs.items() %}
-                        <h2 id="{{ date }}" class="date-header" utc-date="{{ date }}">{{ date }}</h2>
+                        <h2 class="date-header" id="{{ date }}" data-date="{{ date }}">{{ date }}</h2>
                         <div class="log-group">
                             {% for log in logs %}
                                 <div class="card log-card {% if log.stream_deleted %}deleted{% endif %}">
                                     <div class="card-header">
-                                        <span class="log-time" utc-time="{{ log.timestamp.isoformat() }}">{{ log.timestamp.strftime('%I:%M:%S %p') }}</span>
-                                        <span class="log-stream">{{ log.stream_name }}</span>
-                                        <span class="log-type">Type: {{ log.message_type }}</span>
-                                        <span class="log-category">Category: {{ log.log_type }}</span>
+                                        <span class="log-time" data-utc="{{ log.timestamp.isoformat() }}">
+                                            {{ log.timestamp.strftime('%I:%M:%S %p') }}
+                                        </span>
+                                        <span class="log-meta">
+                                            <span class="log-stream compact">{{ log.stream_name }}</span>
+                                            <span class="log-category compact">{{ log.log_type }}</span>
+                                        </span>
                                     </div>
+
                                     <div class="card-body">
-                                        <pre class="log-content">{{ log.message }}</pre>
-                                        {% if log.log_type == 'Parsing' %}
-                                            <div class="parsing-details">
-                                                <p>Event: {{ log.event }}</p>
-                                                {% if log.event == 'type_mismatch' %}
-                                                    <p>Initial Type: {{ log.initial_type }}</p>
-                                                    <p>Detected Type: {{ log.detected_type }}</p>
-                                                    <p>Confidence: {{ log.confidence }}</p>
-                                                {% endif %}
+                                        {% if log.log_type == 'Validation' %}
+                                            <div class="validation-content">
+                                                <div class="validation-status">
+                                                    <span class="validation-label">Is Valid:</span>
+                                                    <span class="validation-value">{{ log.is_valid }}</span>
+                                                </div>
+                                                <pre class="log-content {% if log.truncated %}truncated{% endif %}" 
+                                                     data-full-content="{{ log.full_message if log.truncated else '' }}">{{ log.validation_message }}</pre>
                                             </div>
-                                        {% elif log.log_type == 'Validation' %}
-                                            <div class="validation-details">
-                                                <p>Is Valid: {{ log.is_valid }}</p>
-                                                <p>Validation Message: {{ log.validation_message }}</p>
+                                        {% else %}
+                                            <pre class="log-content {% if log.truncated %}truncated{% endif %}" 
+                                                 data-full-content="{{ log.full_message if log.truncated else '' }}">{{ log.message }}</pre>
+                                        {% endif %}
+
+                                        {% if log.truncated %}
+                                            <div class="truncation-notice" onclick="expandContent(this)">
+                                                Click to view full content
+                                            </div>
+                                        {% endif %}
+
+                                        {% if log.log_type == 'Parsing' and log.event == 'type_mismatch' %}
+                                            <div class="log-details parsing-details">
+                                                <div class="mismatch-details">
+                                                    <span class="detail-label">Initial Type:</span> {{ log.initial_type }}
+                                                    <span class="detail-label">Detected Type:</span> {{ log.detected_type }}
+                                                    <span class="detail-label">Confidence:</span> {{ log.confidence }}
+                                                </div>
                                             </div>
                                         {% endif %}
                                     </div>
@@ -85,85 +143,106 @@
                     </div>
                 {% endif %}
             </div>
-
-            {% if total_pages > 1 %}
-                <div class="pagination">
-                    <a href="{{ url_for('logs.view_logs', page=page-1, stream_uuid=selected_stream_uuid, type=log_type) }}" class="page-link {% if page == 1 %}disabled{% endif %}">Previous</a>
-                    <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
-                    <a href="{{ url_for('logs.view_logs', page=page+1, stream_uuid=selected_stream_uuid, type=log_type) }}" class="page-link {% if page == total_pages %}disabled{% endif %}">Next</a>
-                </div>
-            {% endif %}
         {% else %}
             <div class="error-message">
-                <p>You do not have permission to view logs. Please contact an administrator.</p>
+                You do not have permission to view logs. Please contact an administrator.
             </div>
         {% endif %}
     </div>
 </div>
-
 {% endblock %}
 
 {% block scripts %}
-<script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
 <script>
-document.addEventListener('DOMContentLoaded', function() {
-    const organizationSelect = document.getElementById('organization-select');
-    const streamFilter = document.getElementById('stream-filter');
-    const typeFilter = document.getElementById('type-filter');
+function showLoading() {
+    document.getElementById('loadingOverlay').style.display = 'flex';
+}
 
-    function changeOrganization(orgUuid) {
-        window.location.href = "{{ url_for('logs.view_logs') }}?organization_uuid=" + orgUuid;
-    }
+function hideLoading() {
+    document.getElementById('loadingOverlay').style.display = 'none';
+}
 
-    function updateFilters() {
-        const orgUuid = organizationSelect.value;
-        const streamUuid = streamFilter.value;
-        const messageType = typeFilter.value;
-        window.location.href = "{{ url_for('logs.view_logs') }}?organization_uuid=" + orgUuid + "&stream_uuid=" + streamUuid + "&type=" + messageType;
-    }
-
-    organizationSelect.addEventListener('change', function() {
-        changeOrganization(this.value);
-    });
-    streamFilter.addEventListener('change', updateFilters);
-    typeFilter.addEventListener('change', updateFilters);
-
-    // Convert UTC times to local timezone for individual logs
-    document.querySelectorAll('.log-time').forEach(timeElement => {
-        const utcTime = timeElement.getAttribute('data-utc-time');
-        const localTime = moment.utc(utcTime).local().format('DD MMM YYYY, hh:mm:ssA');
-        timeElement.textContent = localTime;
-    });
+function updateFilters() {
+    showLoading();
+    const streamFilter = document.getElementById('streamFilter');
+    const typeFilter = document.getElementById('typeFilter');
     
-    document.querySelectorAll('.date-header').forEach(header => {
-        const dateStr = header.getAttribute('data-utc-date');
-        const localDate = moment.utc(dateStr).local();
+    const url = new URL(window.location.href);
+    const params = url.searchParams;
+    
+    if (streamFilter.value) {
+        params.set('stream_uuid', streamFilter.value);
+    } else {
+        params.delete('stream_uuid');
+    }
+    
+    if (typeFilter.value && typeFilter.value !== 'all') {
+        params.set('type', typeFilter.value);
+    } else {
+        params.delete('type');
+    }
+    
+    params.set('page', '1');
+    window.location.href = `${url.pathname}?${params.toString()}`;
+}
 
-        if (localDate.isValid()) {
-            const today = moment().startOf('day');
-            const yesterday = moment().subtract(1, 'days').startOf('day');
+function changePage(page) {
+    showLoading();
+    const url = new URL(window.location.href);
+    const params = url.searchParams;
+    params.set('page', page);
+    window.location.href = `${url.pathname}?${params.toString()}`;
+}
 
-            if (localDate.isSame(today, 'day')) {
-                header.textContent = 'Today';
-            } else if (localDate.isSame(yesterday, 'day')) {
-                header.textContent = 'Yesterday';
-            } else {
-                header.textContent = localDate.format('Do MMM YYYY');
-            }
-        } else {
-            header.textContent = dateStr; // Fallback to original string if parsing fails
+function expandContent(element) {
+    const contentElement = element.previousElementSibling;
+    const fullContent = contentElement.dataset.fullContent;
+    contentElement.textContent = fullContent;
+    contentElement.classList.remove('truncated');
+    element.style.display = 'none';
+}
+
+function formatDateTime(utcString) {
+    return moment.utc(utcString).local().format('hh:mm:ss A');
+}
+
+function formatDate(dateString) {
+    if (dateString === 'Today' || dateString === 'Yesterday') {
+        return dateString;
+    }
+    return moment.utc(dateString).local().format('MMMM Do, YYYY');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    // Set moment.js timezone to user's local timezone
+    moment.tz.setDefault(moment.tz.guess());
+
+    // Convert UTC times to local
+    document.querySelectorAll('.log-time').forEach(element => {
+        const utcTime = element.dataset.utc;
+        if (utcTime) {
+            element.textContent = formatDateTime(utcTime);
         }
     });
-});
 
-function getOrdinalSuffix(day) {
-    if (day > 3 && day < 21) return 'th';
-    switch (day % 10) {
-        case 1:  return "st";
-        case 2:  return "nd";
-        case 3:  return "rd";
-        default: return "th";
+    // Format dates
+    document.querySelectorAll('.date-header').forEach(element => {
+        const dateString = element.dataset.date;
+        if (dateString && dateString !== 'Today' && dateString !== 'Yesterday') {
+            element.textContent = formatDate(dateString);
+        }
+    });
+
+    // Hide loading overlay on page load completion
+    hideLoading();
+
+    // Initialize tooltips if any
+    if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+        const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+        tooltipTriggerList.map(function (tooltipTriggerEl) {
+            return new bootstrap.Tooltip(tooltipTriggerEl);
+        });
     }
-}
+});
 </script>
 {% endblock %}

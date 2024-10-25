@@ -1,0 +1,13 @@
+{% if total_pages > 0 %}
+    <div class="pagination">
+        <span class="page-info">Page {{ page }} of {{ total_pages }}</span>
+        {% if page > 1 %}
+            <a href="{{ url_for(request.endpoint, page=page-1, stream_uuid=selected_stream_uuid, type=log_type if 'log_type' in vars() else message_type) }}" 
+               class="page-link">Previous</a>
+        {% endif %}
+        {% if page < total_pages %}
+            <a href="{{ url_for(request.endpoint, page=page+1, stream_uuid=selected_stream_uuid, type=log_type if 'log_type' in vars() else message_type) }}" 
+               class="page-link">Next</a>
+        {% endif %}
+    </div>
+{% endif %}
