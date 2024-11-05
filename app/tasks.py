@@ -1,56 +1,77 @@
-from app.celery_app import celery
+from app.extensions.celery_ext import celery
 from app.extensions import mongo
 from flask import current_app
-import requests
 import json
 from datetime import datetime, timedelta
 from bson import ObjectId
-from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
-from requests.exceptions import RequestException
+from tenacity import retry, stop_after_attempt, wait_fixed
 from app.services.file_parser_service import FileParserService
 from app.services.fhir_validator import FHIRValidator
 from app.services.health_data_converter import process_pending_conversions as hdc_process_pending_conversions
 from app.services.fhir_service import scheduled_fhir_fetch
 from app.utils.logging_utils import log_message_cycle
+from app.services.external_api_service import convert_message, validate_api_response
 
 # Constants
-MAX_RETRY_ATTEMPTS_NEW = 1
-MAX_RETRY_ATTEMPTS_CURRENT = 3
 PROCESSING_TIMEOUT = 300  # 5 minutes
+MAX_RETRIES = 3
+RETRY_DELAY = 5
 
-@retry(stop=stop_after_attempt(3), wait=wait_fixed(5), retry=retry_if_exception_type(RequestException))
-def send_conversion_request(url, payload, attempt, endpoint_type):
-    response = requests.post(url, json=payload, timeout=30)
-    response.raise_for_status()
-    return response
+# Helper Functions
+def should_queue_for_conversion(message_id, parsing_status, detected_type, original_type, error_message=None):
+    """Determines if a message should be queued for conversion"""
+    if parsing_status != 'completed':
+        return False, f"Parsing status is {parsing_status}"
+    
+    if error_message:
+        return False, f"Parsing failed with error: {error_message}"
+    
+    if detected_type == 'FHIR' or original_type == 'FHIR':
+        return False, "FHIR messages do not require conversion"
 
-def convert_message(message, endpoint_url, max_retries, endpoint_type):
-    for attempt in range(max_retries):
-        try:
-            response = send_conversion_request(endpoint_url, message, attempt + 1, endpoint_type)
-            return response.json()
-        except Exception as e:
-            log_message_cycle(
-                message['UUID'],
-                message.get('organization_uuid'),
-                "conversion_error",
-                message['OriginalDataType'],
-                {
-                    "endpoint_type": endpoint_type,
-                    "attempt": attempt + 1,
-                    "error": str(e),
-                    "error_type": type(e).__name__
-                },
-                "error"
-            )
-            if attempt == max_retries - 1:
-                raise
-
-@celery.task(bind=True, max_retries=MAX_RETRY_ATTEMPTS_CURRENT)
-def generic_to_fhir_conversion(self, message_id, message_type):
-    try:
-        current_app.logger.info(f"Starting {message_type} to FHIR conversion for message {message_id}")
+    if detected_type == 'RAW':
+        return False, "Raw messages cannot be converted"
         
+    if detected_type not in ["HL7v2", "Clinical Notes", "CCDA", "X12"]:
+        return False, f"Message type {detected_type} not supported for conversion"
+        
+    return True, "OK"
+
+def update_message_status(message_id, status, error=None, retry_count=None, metadata=None):
+    """Centralized function to update message status"""
+    update_data = {
+        "conversion_status": status,
+        "last_updated": datetime.utcnow()
+    }
+    
+    if error:
+        update_data["error_message"] = str(error)
+        update_data["last_failed_at"] = datetime.utcnow()
+    
+    if retry_count is not None:
+        update_data["retry_count"] = retry_count
+    
+    if metadata:
+        update_data.update(metadata)
+    
+    mongo.db.messages.update_one(
+        {"_id": ObjectId(message_id)},
+        {"$set": update_data}
+    )
+
+# Core Conversion Tasks
+@celery.task(bind=True, max_retries=MAX_RETRIES)
+def generic_to_fhir_conversion(self, message_id, message_type):
+    """Generic task for converting messages to FHIR format"""
+    try:
+        # Initial logging
+        current_app.logger.info(f"Starting {message_type} to FHIR conversion for message {message_id}")
+        log_message_cycle(message_id, None, "conversion_started", message_type, {
+            "task_id": self.request.id,
+            "retry": self.request.retries
+        }, "in_progress")
+        
+        # Get and lock message
         message = mongo.db.messages.find_one_and_update(
             {"_id": ObjectId(message_id), "conversion_status": {"$in": ["pending", "queued", "failed"]}},
             {"$set": {"conversion_status": "processing", "last_processing_start": datetime.utcnow()}},
@@ -58,110 +79,128 @@ def generic_to_fhir_conversion(self, message_id, message_type):
         )
         
         if not message:
-            current_app.logger.info(f"Message {message_id} is already being processed, completed, or still pending parsing")
+            current_app.logger.info(f"Message {message_id} not found or not in valid state for conversion")
             return
 
-        # Check if parsing is complete
-        if message.get('parsing_status') != 'completed':
-            current_app.logger.error(f"Cannot convert message {message_id} - parsing not completed")
-            mongo.db.messages.update_one(
-                {"_id": ObjectId(message_id)},
-                {"$set": {"conversion_status": "pending_parsing"}}
-            )
-            return
+        # Get stream information to determine message source
+        stream = mongo.db.streams.find_one({"uuid": message.get('stream_uuid')})
+        current_app.logger.debug(f"Stream info for message {message_id}: {stream}")
+        
+        # Check if this is an MLLP source
+        is_mllp_source = (
+            stream and 
+            stream.get('message_type') == 'HL7v2' and 
+            stream.get('connection_type') == 'mllp'
+        )
+        
+        current_app.logger.debug(f"Message {message_id} is MLLP source: {is_mllp_source}")
 
-        new_endpoint, current_endpoint = get_endpoint_config(message_type)
-
-        payload = {
-            "UUID": str(message['_id']),
-            "CreationTimestamp": message['timestamp'].timestamp(),
-            "OriginalDataType": message_type,
-            "MessageBody": message['message'],
-            "organization_uuid": message['organization_uuid']
-        }
+        # Only check parsing status for non-MLLP HL7v2 messages or other message types
+        if not (message_type == 'HL7v2' and is_mllp_source):
+            if message.get('parsing_status') != 'completed':
+                current_app.logger.info(f"Setting message {message_id} to pending_parsing status")
+                update_message_status(message_id, "pending_parsing")
+                return
 
         try:
-            if new_endpoint:
-                outgoing_message = convert_message(payload, new_endpoint, MAX_RETRY_ATTEMPTS_NEW, "new")
-            elif current_endpoint:
-                outgoing_message = convert_message(payload, current_endpoint, MAX_RETRY_ATTEMPTS_CURRENT, "current")
-            else:
-                raise ValueError(f"No valid endpoint configuration for message type: {message_type}")
-        except Exception as e:
-            if new_endpoint and current_endpoint:
-                outgoing_message = convert_message(payload, current_endpoint, MAX_RETRY_ATTEMPTS_CURRENT, "current")
-            else:
-                raise
-
-        if not all(key in outgoing_message for key in ['UUID', 'CreationTimestamp', 'ConversionTimestamp', 'OriginalDataType', 'MessageBody', 'Isvalidated']):
-            raise ValueError("Invalid API response structure")
-
-        fhir_content = json.loads(outgoing_message['MessageBody'])
-        
-        fhir_message = {
-            "original_message_uuid": message['uuid'],
-            "organization_uuid": message['organization_uuid'],
-            "fhir_content": fhir_content,
-            "conversion_metadata": {
-                "original_creation_timestamp": outgoing_message['CreationTimestamp'],
-                "conversion_timestamp": outgoing_message['ConversionTimestamp'],
-                "is_validated": outgoing_message['Isvalidated'],
-                "transient_uuid": outgoing_message['UUID'],
-                "original_data_type": outgoing_message['OriginalDataType'],
-                "conversion_time": (datetime.utcnow() - message['timestamp']).total_seconds()
+            # Prepare payload
+            payload = {
+                "UUID": str(message['uuid']),  # Using message uuid instead of _id
+                "CreationTimestamp": message['timestamp'].timestamp(),
+                "OriginalDataType": "HL7" if message_type == "HL7v2" else message_type,  # Fix type name
+                "MessageBody": message['message']
             }
-        }
 
-        # Use upsert to avoid duplicates
-        mongo.db.fhir_messages.update_one(
-            {
+            # Convert message
+            current_app.logger.info(f"Converting message {message_id}")
+            outgoing_message = convert_message(payload, message_type)
+            
+            if not validate_api_response(outgoing_message):
+                raise ValueError("Invalid API response structure")
+
+            # Process successful conversion
+            fhir_message = {
                 "original_message_uuid": message['uuid'],
-                "organization_uuid": message['organization_uuid']
-            },
-            {"$set": fhir_message},
-            upsert=True
-        )
-
-        # Update original message status
-        mongo.db.messages.update_one(
-            {"_id": ObjectId(message_id)},
-            {
-                "$set": {
-                    "conversion_status": "completed",
-                    "retry_count": 0,
-                    "last_converted_at": datetime.utcnow(),
-                    "error_message": None
+                "organization_uuid": message.get('organization_uuid'),
+                "fhir_content": json.loads(outgoing_message['MessageBody']),
+                "conversion_metadata": {
+                    "original_creation_timestamp": outgoing_message['CreationTimestamp'],
+                    "conversion_timestamp": outgoing_message['ConversionTimestamp'],
+                    "is_validated": outgoing_message['Isvalidated'],
+                    "transient_uuid": outgoing_message['UUID'],
+                    "original_data_type": outgoing_message['OriginalDataType'],
+                    "conversion_time": (datetime.utcnow() - message['timestamp']).total_seconds(),
+                    "celery_task_id": self.request.id,
+                    "conversion_retries": self.request.retries
                 }
             }
-        )
 
-        current_app.logger.info(f"{message_type} conversion completed successfully for message {message['uuid']}")
+            # Store converted message
+            current_app.logger.info(f"Storing converted FHIR message for {message_id}")
+            mongo.db.fhir_messages.update_one(
+                {
+                    "original_message_uuid": message['uuid'],
+                    "organization_uuid": message.get('organization_uuid')
+                },
+                {"$set": fhir_message},
+                upsert=True
+            )
+
+            # Update status
+            update_message_status(
+                message_id, 
+                "completed",
+                metadata={
+                    "last_converted_at": datetime.utcnow(),
+                    "retry_count": 0
+                }
+            )
+
+            log_message_cycle(
+                message['uuid'],
+                message.get('organization_uuid'),
+                "conversion_completed",
+                message_type,
+                {
+                    "conversion_time": fhir_message['conversion_metadata']['conversion_time'],
+                    "is_mllp": is_mllp_source
+                },
+                "success"
+            )
+
+        except Exception as e:
+            current_app.logger.error(f"Error converting message {message_id}: {str(e)}")
+            retry_count = message.get('retry_count', 0) + 1
+            
+            if retry_count >= MAX_RETRIES:
+                status = "error"
+                error_msg = f"{str(e)} (Max retry attempts reached)"
+            else:
+                status = "failed"
+                error_msg = str(e)
+                raise self.retry(exc=e)
+            
+            update_message_status(
+                message_id,
+                status,
+                error=error_msg,
+                retry_count=retry_count,
+                metadata={"next_retry_time": datetime.utcnow() + timedelta(seconds=RETRY_DELAY)}
+            )
 
     except Exception as e:
-        current_app.logger.error(f"Error in {message_type} conversion for message {message_id}: {str(e)}")
-        retry_count = message.get('retry_count', 0) + 1 if message else 0
-        next_retry_time = datetime.utcnow() + timedelta(seconds=self.default_retry_delay)
-        
-        update_data = {
-            "conversion_status": "failed",
-            "retry_count": retry_count,
-            "next_retry_time": next_retry_time,
-            "error_message": str(e),
-            "last_failed_at": datetime.utcnow()
-        }
-        
-        if retry_count >= self.max_retries:
-            update_data["conversion_status"] = "error"
-            update_data["error_message"] += " (Max retry attempts reached)"
-        
-        mongo.db.messages.update_one(
-            {"_id": ObjectId(message_id)},
-            {"$set": update_data}
+        current_app.logger.error(f"Unexpected error in conversion task for message {message_id}: {str(e)}")
+        log_message_cycle(
+            message['uuid'] if message else message_id,
+            message.get('organization_uuid') if message else None,
+            "unexpected_error",
+            message_type,
+            {"error": str(e), "is_mllp": is_mllp_source if 'is_mllp_source' in locals() else None},
+            "error"
         )
-        
-        if retry_count < self.max_retries:
-            raise self.retry(exc=e)
+        raise
 
+# Message Type Specific Conversion Tasks
 @celery.task
 def hl7v2_to_fhir_conversion(message_id):
     return generic_to_fhir_conversion(message_id, "HL7v2")
@@ -178,17 +217,204 @@ def ccda_to_fhir_conversion(message_id):
 def x12_to_fhir_conversion(message_id):
     return generic_to_fhir_conversion(message_id, "X12")
 
+# Parsing Tasks
+@celery.task(name="tasks.parse_pasted_message")
+def parse_pasted_message(message_id):
+    """Task for parsing pasted messages"""
+    try:
+        message = mongo.db.messages.find_one({"_id": ObjectId(message_id)})
+        if not message:
+            return
+
+        log_message_cycle(
+            message['uuid'],
+            message['organization_uuid'],
+            "parsing_started",
+            message.get('type', 'unknown'),
+            {"source": "pasted_message"},
+            "in_progress"
+        )
+
+        original_type = message.get('type', 'unknown')
+        extracted_text = message['message']
+        detected_type, confidence = FileParserService.analyze_content(extracted_text)
+
+        # Type detection and parsing
+        should_update_type = confidence > 0.8 and detected_type != original_type
+        final_type = detected_type if should_update_type else original_type
+
+        try:
+            # Parse based on type
+            parsed_content, parsing_status, error_message = parse_content(final_type, extracted_text)
+            
+            # Prepare update data
+            update_data = prepare_parsing_update(
+                parsed_content, 
+                final_type, 
+                parsing_status,
+                detected_type,
+                confidence,
+                error_message
+            )
+
+            # Update message
+            mongo.db.messages.update_one(
+                {"_id": ObjectId(message_id)},
+                {"$set": update_data}
+            )
+
+            # Queue for conversion if appropriate
+            if should_queue_conversion(parsing_status, final_type, error_message):
+                queue_message_conversion(message_id, final_type, message)
+
+            log_parsing_completion(message, final_type, parsing_status, confidence, original_type)
+
+        except Exception as e:
+            handle_parsing_error(message_id, message, final_type, str(e), original_type)
+            raise
+
+    except Exception as e:
+        handle_parsing_failure(message_id, message, str(e))
+        raise
+
+@celery.task(name="tasks.parse_sftp_file")
+def parse_sftp_file(message_id):
+    """Task for parsing SFTP files"""
+    try:
+        message = mongo.db.messages.find_one({"_id": ObjectId(message_id)})
+        if not message:
+            return
+
+        log_message_cycle(
+            message['uuid'],
+            message['organization_uuid'],
+            "sftp_parsing_started",
+            message.get('type', 'unknown'),
+            {"filename": message.get('filename', 'unknown')},
+            "in_progress"
+        )
+
+        original_type = message.get('type', 'unknown')
+        extracted_text = FileParserService.extract_text_from_file(message['local_path'])
+        detected_type, confidence = FileParserService.analyze_content(extracted_text)
+
+        try:
+            parsed_content, parsing_status, error_message = parse_content(detected_type, extracted_text)
+            
+            update_data = prepare_parsing_update(
+                parsed_content,
+                detected_type,
+                parsing_status,
+                detected_type,
+                confidence,
+                error_message
+            )
+
+            mongo.db.messages.update_one(
+                {"_id": ObjectId(message_id)},
+                {"$set": update_data}
+            )
+
+            if should_queue_conversion(parsing_status, detected_type, error_message):
+                queue_message_conversion(message_id, detected_type, message)
+
+            log_parsing_completion(
+                message, 
+                detected_type, 
+                parsing_status, 
+                confidence, 
+                original_type,
+                is_sftp=True
+            )
+
+        except Exception as e:
+            handle_parsing_error(
+                message_id, 
+                message, 
+                detected_type, 
+                str(e), 
+                original_type,
+                is_sftp=True
+            )
+            raise
+
+    except Exception as e:
+        handle_parsing_failure(message_id, message, str(e), is_sftp=True)
+        raise
+
+# Parsing Helper Functions
+def parse_content(message_type, content):
+    """Parse content based on message type"""
+    if message_type == 'CCDA':
+        parsed = FileParserService.parse_ccda(content)
+        error = parsed.get('error')
+        return parsed, 'completed' if not error else 'failed', error
+    elif message_type == 'X12':
+        parsed = FileParserService.parse_x12(content)
+        error = parsed.get('error')
+        return parsed, 'completed' if not error else 'failed', error
+    elif message_type == 'FHIR':
+        try:
+            parsed = json.loads(content)
+            return parsed, 'completed', None
+        except json.JSONDecodeError as e:
+            return content, 'failed', f"Invalid FHIR JSON: {str(e)}"
+    else:
+        return content, 'completed', None
+
+def prepare_parsing_update(content, final_type, parsing_status, detected_type, confidence, error_message):
+    """Prepare update data for parsed message"""
+    update_data = {
+        "message": content,
+        "type": final_type,
+        "parsed": True,
+        "parsing_status": parsing_status,
+        "parsed_at": datetime.utcnow(),
+        "content_analysis": {
+            "detected_type": detected_type,
+            "confidence": confidence
+        }
+    }
+
+    if error_message:
+        update_data.update({
+            "parsing_error": error_message,
+            "conversion_status": "failed"
+        })
+    else:
+        update_data["conversion_status"] = "pending"
+
+    return update_data
+
+def queue_message_conversion(message_id, message_type, message):
+    """Queue message for conversion"""
+    task_mapping = {
+        "HL7v2": hl7v2_to_fhir_conversion,
+        "Clinical Notes": clinical_notes_to_fhir_conversion,
+        "CCDA": ccda_to_fhir_conversion,
+        "X12": x12_to_fhir_conversion
+    }
+    
+    conversion_task = task_mapping.get(message_type)
+    if conversion_task:
+        task = conversion_task.apply_async(
+            args=[str(message_id)],
+            queue=f'{message_type.lower()}_conversion'
+        )
+        return task
+    return None
+
+# Maintenance Tasks
 @celery.task
 def cleanup_old_messages(days=30):
-    current_app.logger.info(f"Starting cleanup of messages older than {days} days")
+    """Clean up old messages"""
     cutoff_date = datetime.utcnow() - timedelta(days=days)
     result = mongo.db.messages.delete_many({"timestamp": {"$lt": cutoff_date}})
-    current_app.logger.info(f"Deleted {result.deleted_count} old messages")
     return result.deleted_count
 
 @celery.task
 def check_stuck_messages():
-    current_app.logger.info("Checking for stuck messages")
+    """Check and reset stuck messages"""
     timeout = datetime.utcnow() - timedelta(seconds=PROCESSING_TIMEOUT)
     stuck_messages = mongo.db.messages.find({
         "conversion_status": "processing",
@@ -197,41 +423,46 @@ def check_stuck_messages():
     
     count = 0
     for message in stuck_messages:
-        mongo.db.messages.update_one(
-            {"_id": message['_id']},
-            {"$set": {"conversion_status": "failed", "error_message": "Conversion timed out"}}
+        update_message_status(str(message['_id']), "failed", error="Conversion timed out")
+        generic_to_fhir_conversion.apply_async(
+            args=[str(message['_id']), message['type']], 
+            queue=f"{message['type'].lower()}_conversion"
         )
-        generic_to_fhir_conversion.apply_async(args=[str(message['_id']), message['type']], queue=f"{message['type'].lower()}_conversion")
         count += 1
     
-    current_app.logger.info(f"Reset {count} stuck messages")
     return count
 
+# Scheduled Tasks
 @celery.task
 def fetch_fhir_data():
+    """Fetch FHIR data from configured servers"""
     current_app.logger.info("Starting scheduled FHIR data fetch")
     scheduled_fhir_fetch()
     current_app.logger.info("Completed scheduled FHIR data fetch")
 
 @celery.task
 def process_pending_conversions():
+    """Process pending message conversions"""
     with current_app.app_context():
         return hdc_process_pending_conversions(current_app, mongo)
 
 @celery.task
 def parse_files():
+    """Process pending file parsing"""
     current_app.logger.info("Starting file parsing process")
     FileParserService.process_pending_files()
     current_app.logger.info("Completed file parsing process")
 
 @celery.task
 def validate_fhir_messages():
+    """Validate converted FHIR messages"""
     current_app.logger.info("Starting FHIR message validation process")
     FHIRValidator.validate_fhir_messages()
     current_app.logger.info("Completed FHIR message validation process")
 
 @celery.task
 def log_conversion_metrics():
+    """Log conversion metrics and statistics"""
     from app.services.health_data_converter import get_conversion_statistics, get_conversion_queue_status
     
     stats = get_conversion_statistics(current_app, mongo)
@@ -242,6 +473,7 @@ def log_conversion_metrics():
 
 @celery.task
 def scheduled_maintenance():
+    """Run scheduled maintenance tasks"""
     current_app.logger.info("Starting scheduled maintenance tasks")
     cleanup_old_messages.delay()
     check_stuck_messages.delay()
@@ -249,38 +481,22 @@ def scheduled_maintenance():
 
 @celery.task
 def refresh_fhir_interfaces():
+    """Refresh FHIR interface configurations"""
     from app.services.fhir_service import initialize_fhir_interfaces
     current_app.logger.info("Refreshing FHIR interfaces")
     initialize_fhir_interfaces()
     current_app.logger.info("FHIR interfaces refreshed")
 
-def get_endpoint_config(message_type):
-    flag_key = f"{message_type.upper()}_DUAL_ENDPOINTSWITCH"
-    flag_value = current_app.config.get(flag_key, "DUAL").upper()
-    
-    new_endpoint_key = f"{message_type.upper()}_NEW_API_URL"
-    current_endpoint_key = f"{message_type.upper()}_CURRENT_API_URL"
-    
-    new_endpoint = current_app.config.get(new_endpoint_key)
-    current_endpoint = current_app.config.get(current_endpoint_key)
-    
-    if flag_value in ["1", "DUAL"]:
-        return new_endpoint, current_endpoint
-    elif flag_value in ["2", "DET"]:
-        return new_endpoint, None
-    elif flag_value in ["3", "PROB"]:
-        return None, current_endpoint
-    else:
-        raise ValueError(f"Invalid flag value for {message_type}: {flag_value}")
-
+# Batch Processing Tasks
 @celery.task
 def process_message_type(message_type):
+    """Process all pending messages of a specific type"""
     current_app.logger.info(f"Starting process_{message_type}_messages function")
     query = {
         "type": message_type,
         "$or": [
             {"conversion_status": "pending"},
-            {"conversion_status": "failed", "retry_count": {"$lt": MAX_RETRY_ATTEMPTS_CURRENT}},
+            {"conversion_status": "failed", "retry_count": {"$lt": MAX_RETRIES}},
             {"conversion_status": "pending_parsing", "parsing_status": "completed"}
         ],
         "organization_uuid": {"$exists": True}
@@ -292,7 +508,6 @@ def process_message_type(message_type):
     for message in pending_messages:
         message_id = str(message['_id'])
         if not celery.AsyncResult(message_id).state:
-            current_app.logger.info(f"Queueing {message_type} message {message_id} for conversion")
             task_mapping = {
                 "HL7v2": hl7v2_to_fhir_conversion,
                 "Clinical Notes": clinical_notes_to_fhir_conversion,
@@ -301,21 +516,18 @@ def process_message_type(message_type):
             }
             conversion_task = task_mapping.get(message_type)
             if conversion_task:
-                conversion_task.apply_async(args=[message_id], task_id=message_id, queue=f'{message_type.lower()}_conversion')
-                mongo.db.messages.update_one(
-                    {"_id": message['_id']},
-                    {"$set": {"conversion_status": "queued"}}
+                conversion_task.apply_async(
+                    args=[message_id],
+                    task_id=message_id,
+                    queue=f'{message_type.lower()}_conversion'
                 )
-            else:
-                current_app.logger.error(f"No conversion task found for message type: {message_type}")
-        else:
-            current_app.logger.info(f"{message_type} message {message_id} already queued for conversion")
+                update_message_status(message_id, "queued")
     
-    current_app.logger.info(f"Processed {len(pending_messages)} {message_type} messages")
     return len(pending_messages)
 
 @celery.task
 def process_all_message_types():
+    """Process messages of all supported types"""
     message_types = ["HL7v2", "Clinical Notes", "CCDA", "X12"]
     total_processed = 0
     
@@ -325,70 +537,57 @@ def process_all_message_types():
     
     return total_processed
 
-@celery.task(name="tasks.parse_pasted_message")
-def parse_pasted_message(message_id):
-    message = mongo.db.messages.find_one({"_id": ObjectId(message_id)})
-    if not message:
-        return
+@celery.task(name="tasks.process_fhir_validation")
+def process_fhir_validation(message_uuid, fhir_content):
+    """Background task for FHIR validation"""
+    with current_app.app_context():
+        return process_fhir_validation(message_uuid, fhir_content)
 
+# Error Handling
+from celery.signals import task_failure
+
+@task_failure.connect
+def handle_task_failure(task_id=None, exception=None, args=None, kwargs=None, traceback=None, einfo=None, sender=None, **other_kwargs):
+    """Handle Celery task failures and infrastructure errors"""
     try:
-        extracted_text = message['message']
-        detected_type, confidence = FileParserService.analyze_content(extracted_text)
+        args = args or []
+        message_id = args[0] if args else None
+        message_type = args[1] if len(args) > 1 else None
+        
+        if message_id:
+            try:
+                message = mongo.db.messages.find_one({"_id": ObjectId(message_id)})
+            except Exception:
+                message = None
 
-        if detected_type != message['type']:
-            log_message_cycle(message['uuid'], message['organization_uuid'], "type_mismatch", message['type'], 
-                              {"detected_type": detected_type, "confidence": confidence}, "info")
-
-        parsed_content = FileParserService.parse_file(extracted_text)
-
-        mongo.db.messages.update_one(
-            {"_id": ObjectId(message_id)},
-            {
-                "$set": {
-                    "type": detected_type,
-                    "parsed": True,
-                    "parsing_status": "completed",
-                    "message": parsed_content,
-                    "content_analysis": {
-                        "detected_type": detected_type,
-                        "confidence": confidence
-                    },
-                    "conversion_status": "pending"  # Change status to pending after parsing
-                }
-            }
-        )
-
-        log_message_cycle(message['uuid'], message['organization_uuid'], "parsing_completed", detected_type, 
-                          {"confidence": confidence}, "success")
-
-        # Queue for conversion if appropriate
-        if detected_type in ["HL7v2", "Clinical Notes", "CCDA", "X12"]:
-            task_mapping = {
-                "HL7v2": hl7v2_to_fhir_conversion,
-                "Clinical Notes": clinical_notes_to_fhir_conversion,
-                "CCDA": ccda_to_fhir_conversion,
-                "X12": x12_to_fhir_conversion
-            }
-            conversion_task = task_mapping.get(detected_type)
-            if conversion_task:
-                conversion_task.apply_async(args=[str(message_id)], queue=f'{detected_type.lower()}_conversion')
-                log_message_cycle(message['uuid'], message['organization_uuid'], "queued_for_conversion", detected_type, 
-                                  {"queue": f'{detected_type.lower()}_conversion'}, "success")
-            else:
-                log_message_cycle(message['uuid'], message['organization_uuid'], "conversion_not_applicable", detected_type, 
-                                  {}, "info")
-        else:
-            mongo.db.messages.update_one(
-                {"_id": ObjectId(message_id)},
-                {"$set": {"conversion_status": "not_applicable"}}
+            # Log infrastructure error
+            log_message_cycle(
+                message['uuid'] if message else str(message_id),
+                message.get('organization_uuid') if message else None,
+                "celery_infrastructure_error",
+                message_type or "unknown",
+                {
+                    "task_id": task_id,
+                    "error": str(exception) if exception else "Unknown error",
+                    "error_type": type(exception).__name__ if exception else "Unknown",
+                    "traceback": str(einfo) if einfo else None,
+                    "celery_task": sender.name if sender else None
+                },
+                "error"
             )
-            log_message_cycle(message['uuid'], message['organization_uuid'], "conversion_not_applicable", detected_type, 
-                              {}, "info")
+
+            # Update message status if available
+            if message:
+                try:
+                    update_message_status(
+                        message_id,
+                        "error",
+                        error=f"Infrastructure error: {str(exception) if exception else 'Unknown error'}"
+                    )
+                except Exception as update_error:
+                    current_app.logger.error(f"Failed to update message status after infrastructure error: {str(update_error)}")
 
     except Exception as e:
-        log_message_cycle(message['uuid'], message['organization_uuid'], "parsing_failed", message['type'], 
-                          {"error": str(e)}, "error")
-        mongo.db.messages.update_one(
-            {"_id": ObjectId(message_id)},
-            {"$set": {"parsing_status": "failed", "error_message": str(e), "conversion_status": "failed"}}
-        )
+        current_app.logger.error(f"Error in task failure handler: {str(e)}")
+        current_app.logger.error(f"Original error: {str(exception) if exception else 'Unknown error'}")
+        current_app.logger.error(f"Task ID: {task_id}")

@@ -127,6 +127,7 @@ def create_message():
                     "uuid": str(uuid.uuid4()),
                     "name": "Pasted Messages",
                     "message_type": "Mixed",
+                    "connection_type": "pasted",
                     "active": True,
                     "created_at": datetime.utcnow(),
                     "updated_at": datetime.utcnow(),
@@ -229,70 +230,209 @@ def new_message():
 @bp.route('/messages/<message_id>')
 @login_required
 def message_detail(message_id):
-    message = mongo.db.messages.find_one({"_id": ObjectId(message_id), "type": {"$ne": "searchset"}, "organization_uuid": g.organization['uuid']})
-    if not message:
-        return render_template('error.html', error_message="Message not found"), 404
-    
-    stream = mongo.db.streams.find_one({"uuid": message['stream_uuid']})
-    message['stream_name'] = stream['name'] if stream else 'Unknown Stream'
-    
-    message['uuid'] = message.get('uuid', str(message['_id']))
-    
-    message_type = message.get('type', 'HL7v2')
-    fhir_translator = FHIRTranslator(current_app.config['FHIR_MAPPING_FILE'])
+    try:
+        def get_fhir_message(message_uuid):
+            return mongo.db.fhir_messages.find_one({
+                "original_message_uuid": message_uuid,
+                "organization_uuid": g.organization['uuid']
+            })
 
-    if message_type in ['FHIR', 'JSON']:
-        try:
-            message['formatted_message'] = json.dumps(json.loads(message['message']), indent=2)
-            message['readable_message'] = fhir_translator.translate(message['message'])
-        except json.JSONDecodeError:
-            message['formatted_message'] = message['message']
-            message['readable_message'] = "Error: Invalid JSON format"
-        except Exception as e:
-            message['readable_message'] = f"Error translating message: {str(e)}"
-    elif message_type in ['CCDA', 'X12', 'Clinical Notes']:
-        message['formatted_message'] = message['message']
-        message['readable_message'] = f"{message_type} content"
+        message = mongo.db.messages.find_one({
+            "_id": ObjectId(message_id), 
+            "type": {"$ne": "searchset"}, 
+            "organization_uuid": g.organization['uuid']
+        })
         
-        # Add file information for SFTP files
-        if 'local_path' in message:
-            message['filename'] = os.path.basename(message['local_path'])
-            message['file_size'] = os.path.getsize(message['local_path'])
-    elif message_type == 'XML':
-        message['formatted_message'] = message['message']
-        message['readable_message'] = "XML parsing not implemented"
-    elif message_type == 'RAW':
-        message['formatted_message'] = message['message']
-        message['readable_message'] = "RAW message format"
-    else:  # HL7v2
-        message['formatted_message'] = message['message'].replace('\r', '\n')
-        
-    # Add parsing and conversion status
-    message['parsing_status'] = message.get('parsing_status', 'N/A')
-    message['conversion_status'] = message.get('conversion_status', 'N/A')
+        if not message:
+            return render_template(
+                'message_detail.html',
+                error={
+                    'title': 'Message Not Found',
+                    'message': 'The requested message could not be found.',
+                    'details': 'The message may have been deleted or you may not have permission to view it.',
+                    'redirect_url': url_for('messages.view_messages')
+                }
+            )
 
-    def get_fhir_message(message_uuid):
-        return mongo.db.fhir_messages.find_one({"original_message_uuid": message_uuid, "organization_uuid": g.organization['uuid']})
+        # Get stream info
+        stream = mongo.db.streams.find_one({"uuid": message['stream_uuid']})
+        message['stream_name'] = stream['name'] if stream else 'Unknown Stream'
+        message['uuid'] = message.get('uuid', str(message['_id']))
 
-    fhir_message = get_fhir_message(message['uuid'])
-    if fhir_message:
-        message['fhir_message'] = json.dumps(fhir_message['fhir_content'], indent=2)
+        # Get all lifecycle logs with comprehensive query
+        lifecycle_logs = list(mongo.db.message_cycle_logs.find({
+            "$or": [
+                {"message_uuid": message['uuid']},
+                {"message_uuid": str(message['_id'])},
+                {"details.mongodb_id": str(message['_id'])}
+            ]
+        }).sort("timestamp", 1))
+
+        # Format logs
+        formatted_logs = []
+        for log in lifecycle_logs:
+            try:
+                formatted_log = {
+                    'timestamp': log['timestamp'],
+                    'formatted_time': log['timestamp'].strftime('%Y-%m-%d %H:%M:%S'),
+                    'event_type': log['event_type'].replace('_', ' ').title(),
+                    'status': log.get('status', 'info'),
+                    'details': log.get('details', {}),
+                    'is_state_change': log['event_type'] in [
+                        'message_created',
+                        'message_stored',
+                        'parsing_started',
+                        'parsing_completed',
+                        'parsing_failed',
+                        'queued_for_parsing',
+                        'queued_for_conversion',
+                        'conversion_started',
+                        'conversion_attempt_started',
+                        'conversion_attempt_completed',
+                        'conversion_attempt_failed',
+                        'conversion_completed',
+                        'conversion_error',
+                        'celery_task_started',
+                        'celery_task_error',
+                        'celery_infrastructure_error',
+                        'new_endpoint_success',
+                        'new_endpoint_failed',
+                        'current_endpoint_success',
+                        'current_endpoint_failed'
+                    ]
+                }
+
+                # Add state transition information
+                if formatted_log['is_state_change']:
+                    state_transitions = {
+                        'message_created': ('New', 'Created'),
+                        'message_stored': ('Created', 'Stored'),
+                        'parsing_started': ('Stored', 'Parsing'),
+                        'parsing_completed': ('Parsing', 'Parsed'),
+                        'parsing_failed': ('Parsing', 'Parse Failed'),
+                        'queued_for_parsing': ('Stored', 'Parse Queued'),
+                        'queued_for_conversion': ('Parsed', 'Conversion Queued'),
+                        'conversion_started': ('Conversion Queued', 'Converting'),
+                        'conversion_attempt_started': ('Converting', 'Attempting Conversion'),
+                        'conversion_attempt_completed': ('Attempting Conversion', 'Converted'),
+                        'conversion_attempt_failed': ('Attempting Conversion', 'Conversion Failed'),
+                        'conversion_completed': ('Converting', 'Converted'),
+                        'conversion_error': ('Converting', 'Conversion Failed'),
+                        'celery_task_started': ('Queued', 'Processing'),
+                        'celery_task_error': ('Processing', 'Task Failed'),
+                        'celery_infrastructure_error': ('Processing', 'Infrastructure Error'),
+                        'new_endpoint_success': ('Attempting', 'Converted (New Endpoint)'),
+                        'new_endpoint_failed': ('Attempting', 'Failed (New Endpoint)'),
+                        'current_endpoint_success': ('Attempting', 'Converted (Current Endpoint)'),
+                        'current_endpoint_failed': ('Attempting', 'Failed (Current Endpoint)')
+                    }
+
+                    if log['event_type'] in state_transitions:
+                        formatted_log['from_state'], formatted_log['to_state'] = state_transitions[log['event_type']]
+                        
+                        # Add transition details
+                        if log.get('details'):
+                            if 'endpoint_type' in log['details']:
+                                formatted_log['transition_reason'] = f"Using {log['details']['endpoint_type']} endpoint"
+                            if 'attempt' in log['details']:
+                                formatted_log['transition_reason'] = f"Attempt {log['details']['attempt']}"
+                            if 'queue' in log['details']:
+                                formatted_log['transition_reason'] = f"Queue: {log['details']['queue']}"
+                            if 'task_id' in log['details']:
+                                formatted_log['transition_reason'] = f"Task ID: {log['details']['task_id']}"
+
+                # Format details for display
+                if log.get('details'):
+                    # Filter out sensitive information
+                    safe_details = {k: v for k, v in log['details'].items() 
+                                  if k not in ['password', 'token', 'secret']}
+                    formatted_log['formatted_details'] = json.dumps(safe_details, indent=2)
+
+                # Handle error information
+                formatted_log['has_error'] = log.get('status') == 'error'
+                if formatted_log['has_error']:
+                    error_details = []
+                    if log.get('error_message'):
+                        error_details.append(log['error_message'])
+                    if log.get('details', {}).get('error'):
+                        error_details.append(log['details']['error'])
+                    formatted_log['error_details'] = ' | '.join(error_details) if error_details else 'An error occurred'
+
+                formatted_logs.append(formatted_log)
+
+            except Exception as e:
+                current_app.logger.error(f"Error formatting log entry: {str(e)}")
+                formatted_logs.append({
+                    'timestamp': datetime.utcnow(),
+                    'formatted_time': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+                    'event_type': 'Log Format Error',
+                    'status': 'error',
+                    'is_state_change': False,
+                    'has_error': True,
+                    'error_details': f"Error formatting log entry: {str(e)}",
+                    'details': {'original_error': str(e)}
+                })
+
+        # Sort logs by timestamp
+        formatted_logs.sort(key=lambda x: x['timestamp'])
+
+        # Process message content based on type
+        message_type = message.get('type', 'HL7v2')
+        fhir_translator = FHIRTranslator(current_app.config['FHIR_MAPPING_FILE'])
+
         try:
-            message['readable_message'] = fhir_translator.translate(fhir_message['fhir_content'])
+            if message_type in ['FHIR', 'JSON']:
+                message['formatted_message'] = json.dumps(json.loads(message['message']), indent=2)
+                message['readable_message'] = fhir_translator.translate(message['message'])
+            elif message_type in ['CCDA', 'X12', 'Clinical Notes']:
+                message['formatted_message'] = message['message']
+                message['readable_message'] = f"{message_type} content"
+                
+                if 'local_path' in message:
+                    message['filename'] = os.path.basename(message['local_path'])
+                    message['file_size'] = os.path.getsize(message['local_path'])
+            elif message_type == 'XML':
+                message['formatted_message'] = message['message']
+                message['readable_message'] = "XML parsing not implemented"
+            elif message_type == 'RAW':
+                message['formatted_message'] = message['message']
+                message['readable_message'] = "RAW message format"
+            else:  # HL7v2
+                message['formatted_message'] = message['message'].replace('\r', '\n')
         except Exception as e:
-            message['readable_message'] = f"Error translating FHIR message: {str(e)}"
-    elif message_type in ['HL7v2', 'Clinical Notes', 'CCDA', 'X12']:
-        if message['conversion_status'] == 'pending':
-            message['readable_message'] = f"{message_type} conversion to FHIR is pending"
-        elif message['conversion_status'] == 'failed':
-            message['readable_message'] = f"{message_type} conversion to FHIR failed"
-        else:
-            message['readable_message'] = f"{message_type} conversion to FHIR not available"
+            current_app.logger.error(f"Error formatting message content: {str(e)}")
+            message['formatted_message'] = "Error formatting message content"
+            message['readable_message'] = f"Error: {str(e)}"
 
-    return render_template('message_detail.html', 
-                           message=message, 
-                           get_fhir_message=get_fhir_message, 
-                           fhir_translator=fhir_translator)
+        message['parsing_status'] = message.get('parsing_status', 'N/A')
+        message['conversion_status'] = message.get('conversion_status', 'N/A')
+
+        # Get FHIR message if available
+        fhir_message = get_fhir_message(message['uuid'])
+        if fhir_message:
+            message['fhir_message'] = json.dumps(fhir_message['fhir_content'], indent=2)
+            try:
+                message['readable_message'] = fhir_translator.translate(fhir_message['fhir_content'])
+            except Exception as e:
+                message['readable_message'] = f"Error translating FHIR message: {str(e)}"
+        elif message_type in ['HL7v2', 'Clinical Notes', 'CCDA', 'X12']:
+            if message['conversion_status'] == 'pending':
+                message['readable_message'] = f"{message_type} conversion to FHIR is pending"
+            elif message['conversion_status'] == 'failed':
+                message['readable_message'] = f"{message_type} conversion to FHIR failed"
+            else:
+                message['readable_message'] = f"{message_type} conversion to FHIR not available"
+
+        return render_template('message_detail.html', 
+                             message=message,
+                             get_fhir_message=get_fhir_message,
+                             fhir_translator=fhir_translator,
+                             lifecycle_logs=formatted_logs)
+
+    except Exception as e:
+        current_app.logger.error(f"Error in message_detail: {str(e)}", exc_info=True)
+        flash('An error occurred while retrieving message details', 'error')
+        return redirect(url_for('messages.view_messages'))
 
 @bp.route('/messages/<message_id>/original_file')
 @login_required

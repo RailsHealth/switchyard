@@ -154,14 +154,32 @@ class SFTPInterface(BaseInterface):
 
     def _queue_message_for_parsing(self, message_id):
         try:
-            task = parse_pasted_message.apply_async(args=[str(message_id)], queue='file_parsing')
-            self.logger.info(f"Successfully queued message {message_id} for parsing. Task ID: {task.id}")
-            log_message_cycle(str(message_id), self.organization_uuid, "queued_for_parsing", "SFTP", 
-                              {"task_id": task.id}, "success")
+            task = parse_sftp_file.apply_async(
+                args=[str(message_id)], 
+                queue=current_app.config['SFTP_FILE_PARSING_QUEUE']
+            )
+            self.logger.info(f"Successfully queued SFTP file {message_id} for parsing. Task ID: {task.id}")
+            log_message_cycle(
+                str(message_id), 
+                self.organization_uuid, 
+                "queued_for_sftp_parsing", 
+                "SFTP", 
+                {
+                    "task_id": task.id,
+                    "queue": current_app.config['SFTP_FILE_PARSING_QUEUE']
+                }, 
+                "success"
+            )
         except Exception as e:
-            self.logger.error(f"Failed to queue message {message_id} for parsing: {str(e)}")
-            log_message_cycle(str(message_id), self.organization_uuid, "queue_failed", "SFTP", 
-                              {"error": str(e)}, "error")
+            self.logger.error(f"Failed to queue SFTP file {message_id} for parsing: {str(e)}")
+            log_message_cycle(
+                str(message_id), 
+                self.organization_uuid, 
+                "queue_for_sftp_parsing_failed", 
+                "SFTP", 
+                {"error": str(e)}, 
+                "error"
+            )
 
     def update_fetch_interval(self, new_interval):
         self.fetch_interval = new_interval

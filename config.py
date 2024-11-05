@@ -38,7 +38,9 @@ class Config:
     # Celery Queue Names
     FHIR_QUEUE = 'fhir_queue'
     CONVERSION_QUEUE = 'conversion_queue'
-    FILE_QUEUE = 'file_queue'
+    PASTED_MESSAGE_PARSING_QUEUE = 'pasted_message_parsing'
+    SFTP_FILE_PARSING_QUEUE = 'sftp_file_parsing'
+    FILE_PARSING_QUEUE = 'file_parsing'  # Generic file parsing queue
     VALIDATION_QUEUE = 'validation_queue'
     MAINTENANCE_QUEUE = 'maintenance_queue'
     METRICS_QUEUE = 'metrics_queue'
@@ -51,7 +53,10 @@ class Config:
     CELERY_TASK_ROUTES = {
         'app.tasks.fetch_fhir_data': {'queue': FHIR_QUEUE},
         'app.tasks.process_pending_conversions': {'queue': CONVERSION_QUEUE},
-        'app.tasks.parse_files': {'queue': FILE_QUEUE},
+        'app.tasks.parse_pasted_message': {'queue': PASTED_MESSAGE_PARSING_QUEUE},
+        'app.tasks.parse_sftp_file': {'queue': SFTP_FILE_PARSING_QUEUE},
+        'app.tasks.parse_files': {'queue': FILE_PARSING_QUEUE},
+        'app.services.file_parser_service.extract_and_parse_file': {'queue': FILE_PARSING_QUEUE},
         'app.tasks.validate_fhir_messages': {'queue': VALIDATION_QUEUE},
         'app.tasks.periodic_cleanup': {'queue': MAINTENANCE_QUEUE},
         'app.tasks.log_conversion_metrics': {'queue': METRICS_QUEUE},
@@ -68,6 +73,8 @@ class Config:
     FETCH_FHIR_INTERVAL = 600
     PROCESS_PENDING_CONVERSIONS_INTERVAL = 60
     PARSE_FILES_INTERVAL = 30
+    PARSE_PASTED_MESSAGE_INTERVAL = 10  # seconds
+    PARSE_SFTP_FILE_INTERVAL = 15  # seconds
     VALIDATE_FHIR_MESSAGES_INTERVAL = 300
     PERIODIC_CLEANUP_INTERVAL = 3600
     LOG_CONVERSION_METRICS_INTERVAL = 900
@@ -96,20 +103,16 @@ class Config:
     }
 
     # Conversion API URLs
-    HL7V2_NEW_API_URL = os.environ.get('HL7V2_NEW_API_URL')
-    CLINICAL_NOTES_NEW_API_URL = os.environ.get('CLINICAL_NOTES_NEW_API_URL')
-    CCDA_NEW_API_URL = os.environ.get('CCDA_NEW_API_URL')
-    X12_NEW_API_URL = os.environ.get('X12_NEW_API_URL')
-    HL7V2_CURRENT_API_URL = os.environ.get('HL7V2_CURRENT_API_URL')
-    CLINICAL_NOTES_CURRENT_API_URL = os.environ.get('CLINICAL_NOTES_CURRENT_API_URL')
-    CCDA_CURRENT_API_URL = os.environ.get('CCDA_CURRENT_API_URL')
-    X12_CURRENT_API_URL = os.environ.get('X12_CURRENT_API_URL')
+    HL7V2_API_URL = os.environ.get('HL7V2_API_URL')
+    CLINICAL_NOTES_API_URL = os.environ.get('CLINICAL_NOTES_API_URL')
+    CCDA_API_URL = os.environ.get('CCDA_API_URL')
+    X12_API_URL = os.environ.get('X12_API_URL')
 
-    # Dual endpoint switch flags
-    HL7V2_DUAL_ENDPOINTSWITCH = os.environ.get('HL7V2_DUAL_ENDPOINTSWITCH', 'DUAL')
-    CLINICAL_NOTES_DUAL_ENDPOINTSWITCH = os.environ.get('CLINICAL_NOTES_DUAL_ENDPOINTSWITCH', 'DUAL')
-    CCDA_DUAL_ENDPOINTSWITCH = os.environ.get('CCDA_DUAL_ENDPOINTSWITCH', 'DUAL')
-    X12_DUAL_ENDPOINTSWITCH = os.environ.get('X12_DUAL_ENDPOINTSWITCH', 'DUAL')
+    # Conversion settings
+    MAX_CONVERSION_RETRIES = 3
+    CONVERSION_RETRY_DELAY = 5  # seconds between retries
+    PROCESSING_TIMEOUT = 300  # 5 minutes
+
 
     # Storage settings
     STORAGE_TYPE = os.environ.get('STORAGE_TYPE', 'local')

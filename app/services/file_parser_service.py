@@ -2,11 +2,11 @@ import pdfplumber
 from lxml import etree
 import os
 import re
-from app.extensions import mongo, celery
+from app.extensions import mongo
+from app.extensions.celery_ext import celery
 from datetime import datetime
 from bson import ObjectId
 from io import StringIO
-from app import celery
 from app.utils.logging_utils import log_message_cycle
 
 class FileParserService:

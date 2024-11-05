@@ -1,80 +1,171 @@
 {% extends "base.html" %}
 {% block title %}Message Details{% endblock %}
 {% block content %}
+
+{% if error %}
+<!-- Error Modal -->
+<div id="errorModal" class="modal">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h2>{{ error.title }}</h2>
+        </div>
+        <div class="modal-body">
+            <p>{{ error.message }}</p>
+            {% if error.details %}
+            <div class="error-details">
+                <p>{{ error.details }}</p>
+            </div>
+            {% endif %}
+        </div>
+        <div class="modal-footer">
+            <button onclick="window.location.href='{{ error.redirect_url }}'" class="btn btn-primary">OK</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Show modal on page load if there's an error
+    document.addEventListener('DOMContentLoaded', function() {
+        var modal = document.getElementById('errorModal');
+        if (modal) {
+            modal.style.display = 'block';
+        }
+    });
+</script>
+{% else %}
 <div class="message-detail">
     <div class="message-header">
         <h1>Message Details</h1>
         <p>Viewing message details for {{ g.organization['name'] }}</p>
         <div class="breadcrumbs">
-            <a href="{{ url_for('messages.view_messages') }}">Messages</a> / Message Details
+            <a href="{{ url_for('messages.view_messages') }}">Messages</a> /
+            Message Details
         </div>
     </div>
 
     <div class="message-meta">
-        <p><strong>Created at:</strong> {{ message['timestamp'].strftime('%d/%m/%Y, %I:%M:%S %p') }}</p>
-        <p><strong>UUID:</strong> {{ message['uuid'] }}</p>
-        <p><strong>Stream:</strong> {{ message['stream_name'] }}</p>
-        <p><strong>Input Message Type:</strong> {{ message['type'] }}</p>
-        <p><strong>Parsing Status:</strong> {{ message.get('parsing_status', 'N/A') }}</p>
-        <p><strong>Conversion Status:</strong> {{ message.get('conversion_status', 'N/A') }}</p>
+        <div>
+            <p><strong>Created at:</strong> {{ message['timestamp'].strftime('%d/%m/%Y, %I:%M:%S %p') }}</p>
+            <p><strong>UUID:</strong> {{ message['uuid'] }}</p>
+        </div>
+        <div>
+            <p><strong>Stream:</strong> {{ message['stream_name'] }}</p>
+            <p><strong>Input Message Type:</strong> {{ message['type'] }}</p>
+            <p><strong>Parsing Status:</strong> {{ message.get('parsing_status', 'N/A') }}</p>
+            <p><strong>Conversion Status:</strong> {{ message.get('conversion_status', 'N/A') }}</p>
+        </div>
     </div>
 
-    <div class="message-detail-content">
-        <div class="tabs">
-            <button class="tab-button active" onclick="openTab(event, 'original-message')">Original Message</button>
-            {% if message['type'] in ['CCDA', 'X12', 'Clinical Notes'] and message['stream_name'] != "Pasted Messages" %}
-                <button class="tab-button" onclick="openTab(event, 'original-file')">Original File</button>
-            {% endif %}
-            {% if message['type'] in ['HL7v2', 'Clinical Notes', 'CCDA', 'X12'] %}
-                <button class="tab-button" onclick="openTab(event, 'converted-fhir')">Converted FHIR</button>
-            {% endif %}
-            <button class="tab-button" onclick="openTab(event, 'read-easily')">Read Easily</button>
-        </div>
-    
-        <div id="original-message" class="tab-content active">
-            {% if message['parsing_status'] == 'failed' %}
-                <p>Text parsing failed. Please refer to the original file.</p>
-            {% else %}
-                <pre><code>{{ message['formatted_message'] | safe }}</code></pre>
-            {% endif %}
-        </div>
-    
+    <div class="tabs">
+        <button class="tab-button" onclick="openTab(event, 'original-message')">Original Message</button>
         {% if message['type'] in ['CCDA', 'X12', 'Clinical Notes'] and message['stream_name'] != "Pasted Messages" %}
-            <div id="original-file" class="tab-content">
-                <p><strong>Filename:</strong> {{ message['filename'] }}</p>
-                <p><strong>File Size:</strong> {{ message['file_size'] }} bytes</p>
-            </div>
+        <button class="tab-button" onclick="openTab(event, 'original-file')">Original File</button>
         {% endif %}
-    
         {% if message['type'] in ['HL7v2', 'Clinical Notes', 'CCDA', 'X12'] %}
-            <div id="converted-fhir" class="tab-content">
+        <button class="tab-button" onclick="openTab(event, 'converted-fhir')">Converted FHIR</button>
+        {% endif %}
+        <button class="tab-button" onclick="openTab(event, 'read-easily')">Read Easily</button>
+        <button class="tab-button" onclick="openTab(event, 'lifecycle-logs')">Lifecycle Logs</button>
+    </div>
+
+    <div id="original-message" class="tab-content">
+        {% if message['parsing_status'] == 'failed' %}
+        <p>Text parsing failed. Please refer to the original file.</p>
+        {% else %}
+        <pre><code class="json">{{ message['formatted_message'] | safe }}</code></pre>
+        {% endif %}
+    </div>
+
+    {% if message['type'] in ['CCDA', 'X12', 'Clinical Notes'] and message['stream_name'] != "Pasted Messages" %}
+    <div id="original-file" class="tab-content">
+        <p><strong>Filename:</strong> {{ message['filename'] }}</p>
+        <p><strong>File Size:</strong> {{ message['file_size'] }} bytes</p>
+        <a href="{{ url_for('messages.serve_original_file', message_id=message['_id']) }}" class="btn btn-primary">Download Original File</a>
+    </div>
+    {% endif %}
+
+    {% if message['type'] in ['HL7v2', 'Clinical Notes', 'CCDA', 'X12'] %}
+    <div id="converted-fhir" class="tab-content">
+        {% set fhir_message = get_fhir_message(message['uuid']) %}
+        {% if fhir_message %}
+        <div class="bundle-content collapsible">
+            <pre><code class="json">{{ fhir_message['fhir_content'] | tojson(indent=2) | safe }}</code></pre>
+        </div>
+        {% else %}
+        <p>No converted FHIR message available.</p>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <div id="read-easily" class="tab-content">
+        <div class="readable-content">
+            {% if message['type'] == 'FHIR' %}
+                {{ fhir_translator.translate(message['formatted_message']) | safe }}
+            {% elif message['type'] in ['HL7v2', 'Clinical Notes', 'CCDA', 'X12'] %}
                 {% set fhir_message = get_fhir_message(message['uuid']) %}
                 {% if fhir_message %}
-                    <pre><code class="json">{{ fhir_message['fhir_content'] | tojson(indent=2) | safe }}</code></pre>
-                {% else %}
-                    <p>No converted FHIR message available.</p>
-                {% endif %}
-            </div>
-        {% endif %}
-    
-        <div id="read-easily" class="tab-content">
-            <div class="readable-content">
-                {% if message['type'] == 'FHIR' %}
-                    {{ fhir_translator.translate(message['formatted_message']) | safe }}
-                {% elif message['type'] in ['HL7v2', 'Clinical Notes', 'CCDA', 'X12'] %}
-                    {% set fhir_message = get_fhir_message(message['uuid']) %}
-                    {% if fhir_message %}
-                        {{ fhir_translator.translate(fhir_message['fhir_content']) | safe }}
-                    {% else %}
-                        {{ message['readable_message'] | safe if message.get('readable_message') else 'No readable version available.' }}
-                    {% endif %}
+                    {{ fhir_translator.translate(fhir_message['fhir_content']) | safe }}
                 {% else %}
                     {{ message['readable_message'] | safe if message.get('readable_message') else 'No readable version available.' }}
                 {% endif %}
-            </div>
+            {% else %}
+                {{ message['readable_message'] | safe if message.get('readable_message') else 'No readable version available.' }}
+            {% endif %}
+        </div>
+    </div>
+
+    <div id="lifecycle-logs" class="tab-content">
+        <div class="lifecycle-logs">
+            {% if lifecycle_logs %}
+                <div class="log-timeline">
+                    {% for log in lifecycle_logs %}
+                        <div class="log-entry {{ log.status }}">
+                            <div class="log-timestamp">
+                                {{ log['formatted_time'] }}
+                            </div>
+    
+                            <div class="log-event">
+                                {{ log['event_type'] | replace('_', ' ') | title }}
+                            </div>
+    
+                            {% if log['is_state_change'] %}
+                                <div class="state-transition">
+                                    {{ log['from_state'] }} 
+                                    <span class="state-arrow">→</span> 
+                                    {{ log['to_state'] }}
+                                    {% if log['transition_reason'] %}
+                                        ({{ log['transition_reason'] }})
+                                    {% endif %}
+                                </div>
+                            {% endif %}
+    
+                            {% if log['details'] %}
+                                <div class="log-details">
+                                    <a href="#" class="toggle-link" onclick="toggleCollapsible(this); return false;">view details</a>
+                                    <div class="collapsible-content">
+                                        {{ log['formatted_details'] }}
+                                    </div>
+                                </div>
+                            {% endif %}
+    
+                            {% if log['has_error'] %}
+                                <div class="error-message">
+                                    {{ log['error_details'] }}
+                                </div>
+                            {% endif %}
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="lifecycle-empty">
+                    No lifecycle logs available for this message.
+                </div>
+            {% endif %}
         </div>
     </div>
 </div>
+    {{ super() }}
+{% endif %}
 {% endblock %}
 
 {% block scripts %}
@@ -113,6 +204,16 @@ function toggleResource(element) {
         content.style.display = "block";
     }
 }
+function toggleCollapsible(linkElement) {
+        const contentElement = linkElement.nextElementSibling;
+        if (contentElement.style.display === 'block') {
+            contentElement.style.display = 'none';
+            linkElement.textContent = 'view details';
+        } else {
+            contentElement.style.display = 'block';
+            linkElement.textContent = 'hide details';
+        }
+    }
 
 function showReferenceDetails(reference) {
     alert('Reference details for: ' + reference);
@@ -121,7 +222,19 @@ function showReferenceDetails(reference) {
 
 // Initialize the first tab as active
 document.addEventListener('DOMContentLoaded', function() {
-    document.querySelector('.tab-button').click();
+    // Set the first tab as active by default
+    const firstTab = document.querySelector('.tab-button');
+    if (firstTab) {
+        firstTab.click();
+    }
+
+    // Add click handlers for all collapsible elements
+    const collapsibles = document.querySelectorAll('.collapsible');
+    collapsibles.forEach(collapsible => {
+        collapsible.addEventListener('click', function() {
+            this.classList.toggle('active');
+        });
+    });
 });
 </script>
 {% endblock %}

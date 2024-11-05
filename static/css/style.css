@@ -2231,3 +2231,160 @@ select.form-control {
     margin-top: 20px;
 }
 
+/*lifecycle logs*/
+.lifecycle-logs {
+    padding: 1rem;
+}
+
+.log-timeline {
+    position: relative;
+    padding: 1rem 0;
+}
+
+.log-entry {
+    position: relative;
+    padding: 1rem;
+    margin-bottom: 1rem;
+    border-left: 3px solid #e0e0e0;
+    background: #fff;
+    border-radius: 0.25rem;
+}
+
+.log-entry.success {
+    border-left-color: #28a745;
+}
+
+.log-entry.error {
+    border-left-color: #dc3545;
+}
+
+.log-entry.in_progress {
+    border-left-color: #17a2b8;
+}
+
+.log-timestamp {
+    font-size: 0.875rem;
+    color: #6c757d;
+    margin-bottom: 0.5rem;
+}
+
+.log-event {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.state-transition {
+    background: #e0e0e0;
+    padding: 0.5rem;
+    border-radius: 0.25rem;
+    margin: 0.5rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.state-arrow {
+    color: #6c757d;
+    font-weight: bold;
+}
+
+.log-details {
+    margin-top: 0.5rem;
+}
+
+.toggle-link {
+    color: #007bff;
+    text-decoration: none;
+    font-size: 0.875rem;
+}
+
+.toggle-link:hover {
+    text-decoration: underline;
+}
+
+.collapsible-content {
+    display: none;  /* Hidden by default */
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: #f8f9fa;
+    border-radius: 0.25rem;
+    font-family: monospace;
+    white-space: pre-wrap;
+    border: 1px solid #e0e0e0;
+}
+
+.error-message {
+    color: #dc3545;
+    margin-top: 0.5rem;
+    padding: 0.5rem;
+    background: #f8d7da;
+    border-radius: 0.25rem;
+}
+
+.lifecycle-empty {
+    text-align: center;
+    padding: 2rem;
+    color: #6c757d;
+}
+
+/* error modal message_detail*/
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 15% auto;
+    padding: 0;
+    border: 1px solid #888;
+    border-radius: 8px;
+    width: 80%;
+    max-width: 500px;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+.modal-header {
+    padding: 15px 20px;
+    background-color: #f8f9fa;
+    border-bottom: 1px solid #dee2e6;
+    border-radius: 8px 8px 0 0;
+}
+
+.modal-header h2 {
+    margin: 0;
+    font-size: 1.25rem;
+    color: #343a40;
+}
+
+.modal-body {
+    padding: 20px;
+    color: #495057;
+}
+
+.error-details {
+    margin-top: 10px;
+    padding: 10px;
+    background-color: #f8f9fa;
+    border-radius: 4px;
+    font-family: monospace;
+    font-size: 0.875rem;
+    color: #dc3545;
+}
+
+.modal-footer {
+    padding: 15px 20px;
+    border-top: 1px solid #dee2e6;
+    display: flex;
+    justify-content: flex-end;
+}
+
+.modal-footer .btn {
+    min-width: 80px;
+}
