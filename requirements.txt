@@ -33,3 +33,4 @@ celery
 redis
 PyYAML
 hl7apy
+flower
