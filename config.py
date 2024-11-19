@@ -35,6 +35,12 @@ class Config:
     CELERY_TASK_ACKS_LATE = True
     CELERY_TASK_REJECT_ON_WORKER_LOST = True
 
+    # Test HL7 Service Configuration
+    TEST_HL7_SERVICE_URL = os.getenv('TEST_HL7_SERVICE_URL', 'http://localhost:8001')
+    TEST_HL7_SERVICE_MLLP_HOST = os.getenv('TEST_HL7_SERVICE_MLLP_HOST', 'localhost')
+    TEST_HL7_SERVICE_API_KEY = os.getenv('TEST_HL7_SERVICE_API_KEY', 'your-api-key-here')
+    TEST_HL7_ENABLED = os.getenv('TEST_HL7_ENABLED', 'True') == 'True'
+
     # Celery Queue Names
     FHIR_QUEUE = 'fhir_queue'
     CONVERSION_QUEUE = 'conversion_queue'

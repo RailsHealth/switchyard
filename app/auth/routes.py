@@ -51,6 +51,7 @@ def logout():
     flash('You have been logged out successfully.', 'info')
     return redirect(url_for('main.index'))
 
+
 @bp.route('/authorized')
 def authorized():
     try:
@@ -67,19 +68,26 @@ def authorized():
             return redirect(url_for('auth.login'))
 
         user_info = resp.json()
-        google_id = user_info['sub']
-        email = user_info['email']
+        logger.debug(f"Received user info: {user_info}")  # Debug log
         
+        google_id = user_info['sub']
+        email = user_info.get('email')
+        
+        if not email:
+            logger.error("No email found in user info")
+            flash('Failed to get email from Google. Please try again.', 'error')
+            return redirect(url_for('auth.login'))
+
         # Check if user exists
         user = User.get_by_google_id(google_id)
         if not user:
-            # Create new user
+            # Create new user with minimal info
             try:
                 user_id = User.create(
                     google_id=google_id,
-                    name=user_info['name'],
+                    name=user_info.get('name', email.split('@')[0]),  # Use email prefix if name not available
                     email=email,
-                    profile_picture_url=user_info.get('picture')
+                    profile_picture_url=user_info.get('picture', '')
                 )
                 logger.info(f"Created new user with email {email}")
             except Exception as e:
@@ -88,10 +96,30 @@ def authorized():
                 return redirect(url_for('auth.login'))
         else:
             user_id = user['uuid']
-            User.update(user_id, last_login=datetime.utcnow())
-            logger.info(f"Updated last login for user {email}")
+            # Update user with latest info
+            try:
+                User.update(
+                    user_id,
+                    last_login=datetime.utcnow(),
+                    name=user_info.get('name', user.get('name', email.split('@')[0])),
+                    profile_picture_url=user_info.get('picture', user.get('profile_picture_url', ''))
+                )
+                logger.info(f"Updated last login for user {email}")
+            except Exception as e:
+                logger.error(f"Error updating user: {str(e)}")
+                # Continue anyway as this is not critical
 
         session['user_id'] = user_id
+
+        # Check if this was an admin panel access attempt
+        next_url = session.pop('next_url', None)
+        if next_url and next_url.startswith('/admin'):
+            # Verify admin access
+            if email in current_app.config['ADMIN_PANEL_EMAILS']:
+                return redirect(next_url)
+            else:
+                flash('You do not have admin access.', 'error')
+                return redirect(url_for('main.dashboard'))
 
         # Check user's organizations
         user_orgs = User.get_organizations(user_id)
@@ -99,11 +127,8 @@ def authorized():
             session['current_org_id'] = user_orgs[0]['uuid']
             logger.info(f"Set current organization to {user_orgs[0]['name']}")
             
-            # Check for next_url in session
-            next_url = session.pop('next_url', None)
             if next_url:
                 return redirect(next_url)
-                
             return redirect(url_for('main.dashboard'))
         else:
             logger.info(f"User {email} has no organizations, redirecting to create organization")

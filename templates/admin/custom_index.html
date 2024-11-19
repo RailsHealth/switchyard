@@ -1,0 +1,62 @@
+
+{% extends 'admin/master.html' %}
+{% block body %}
+<div class="container">
+    <h1>Rails Health Administration</h1>
+    <div class="row">
+        <div class="col-sm-6">
+            <div class="panel panel-primary">
+                <div class="panel-heading">
+                    <h3 class="panel-title">Quick Stats</h3>
+                </div>
+                <div class="panel-body">
+                    <ul class="list-group">
+                        <li class="list-group-item">
+                            <span class="badge">{{ stats.streams }}</span>
+                            Active Streams
+                        </li>
+                        <li class="list-group-item">
+                            <span class="badge">{{ stats.messages }}</span>
+                            Total Messages
+                        </li>
+                        <li class="list-group-item">
+                            <span class="badge">{{ stats.fhir }}</span>
+                            FHIR Messages
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        <div class="col-sm-6">
+            <div class="panel panel-info">
+                <div class="panel-heading">
+                    <h3 class="panel-title">System Status</h3>
+                </div>
+                <div class="panel-body">
+                    <ul class="list-group">
+                        <li class="list-group-item">
+                            <span class="label label-{{ 'success' if celery_status else 'danger' }} pull-right">
+                                {{ 'Running' if celery_status else 'Stopped' }}
+                            </span>
+                            Celery Workers
+                        </li>
+                        <li class="list-group-item">
+                            <span class="label label-{{ 'success' if redis_status else 'danger' }} pull-right">
+                                {{ 'Connected' if redis_status else 'Disconnected' }}
+                            </span>
+                            Redis Connection
+                        </li>
+                        <li class="list-group-item">
+                            <span class="label label-{{ 'success' if mongo_status else 'danger' }} pull-right">
+                                {{ 'Connected' if mongo_status else 'Disconnected' }}
+                            </span>
+                            MongoDB Connection
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+            

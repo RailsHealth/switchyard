@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Create New Stream - Rails Health Interface{% endblock %}
 {% block content %}
+
 <div class="main-content">
     <div class="create-stream-container">
         <div class="create-stream-header">
@@ -9,25 +10,96 @@
         </div>
 
         <div class="breadcrumb">
-            <a href="{{ url_for('streams.view_streams') }}">Input Streams</a> /
-            Create Stream
+            <a href="{{ url_for('streams.view_streams') }}">Input Streams</a> / Create Stream
         </div>
 
         {% if g.user_role == 'admin' %}
             <div class="create-stream-form">
                 <h2>Select Message Type</h2>
+                
                 <form method="POST" action="{{ url_for('streams.create_stream') }}">
                     {{ form.csrf_token }}
+                    
                     <div class="type-form-group">
                         <div class="type-grid">
-                            {% for message_type in ['HL7v2', 'FHIR Test Server', 'CCDA (SFTP)', 'X12 (SFTP)', 'Clinical Notes (SFTP)'] %}
-                                <div class="type-option">
-                                    <input type="radio" id="{{ message_type }}" name="message_type" value="{{ message_type }}">
-                                    <label for="{{ message_type }}">{{ message_type }}</label>
-                                </div>
-                            {% endfor %}
+                            <!-- Regular HL7v2 Option -->
+                            <div class="type-option {% if form.message_type.data == 'HL7v2' %}selected{% endif %}">
+                                <input type="radio" name="message_type" value="HL7v2" id="HL7v2" class="stream-type-radio"
+                                       {% if form.message_type.data == 'HL7v2' %}checked{% endif %}>
+                                <label for="HL7v2" class="stream-type-label">
+                                    <div class="type-icon hl7-icon"></div>
+                                    <h3>HL7v2</h3>
+                                    <p>Connect to an HL7v2 source</p>
+                                </label>
+                            </div>
+
+                            <!-- Test HL7v2 Option -->
+                            <div class="type-option {% if form.message_type.data == 'test_hl7v2' %}selected{% endif %}">
+                                <input type="radio" name="message_type" value="test_hl7v2" id="test_hl7v2" 
+                                       class="stream-type-radio"
+                                       {% if has_test_stream %}disabled{% endif %}
+                                       {% if form.message_type.data == 'test_hl7v2' %}checked{% endif %}>
+                                <label for="test_hl7v2" class="stream-type-label {% if has_test_stream %}disabled{% endif %}">
+                                    <div class="type-icon test-hl7-icon"></div>
+                                    <h3>Test HL7v2 Stream</h3>
+                                    <p>Create a test HL7v2 stream
+                                        {% if has_test_stream %}
+                                            <span class="test-stream-badge">Already exists</span>
+                                        {% endif %}
+                                    </p>
+                                </label>
+                            </div>
+
+                            <!-- FHIR Test Server Option -->
+                            <div class="type-option {% if form.message_type.data == 'FHIR Test Server' %}selected{% endif %}">
+                                <input type="radio" name="message_type" value="FHIR Test Server" id="FHIR" 
+                                       class="stream-type-radio"
+                                       {% if form.message_type.data == 'FHIR Test Server' %}checked{% endif %}>
+                                <label for="FHIR" class="stream-type-label">
+                                    <div class="type-icon fhir-icon"></div>
+                                    <h3>FHIR Test Server</h3>
+                                    <p>Connect to FHIR test servers</p>
+                                </label>
+                            </div>
+
+                            <!-- CCDA Option -->
+                            <div class="type-option {% if form.message_type.data == 'CCDA (SFTP)' %}selected{% endif %}">
+                                <input type="radio" name="message_type" value="CCDA (SFTP)" id="CCDA" 
+                                       class="stream-type-radio"
+                                       {% if form.message_type.data == 'CCDA (SFTP)' %}checked{% endif %}>
+                                <label for="CCDA" class="stream-type-label">
+                                    <div class="type-icon ccda-icon"></div>
+                                    <h3>CCDA (SFTP)</h3>
+                                    <p>Connect to CCDA SFTP source</p>
+                                </label>
+                            </div>
+
+                            <!-- X12 Option -->
+                            <div class="type-option {% if form.message_type.data == 'X12 (SFTP)' %}selected{% endif %}">
+                                <input type="radio" name="message_type" value="X12 (SFTP)" id="X12" 
+                                       class="stream-type-radio"
+                                       {% if form.message_type.data == 'X12 (SFTP)' %}checked{% endif %}>
+                                <label for="X12" class="stream-type-label">
+                                    <div class="type-icon x12-icon"></div>
+                                    <h3>X12 (SFTP)</h3>
+                                    <p>Connect to X12 SFTP source</p>
+                                </label>
+                            </div>
+
+                            <!-- Clinical Notes Option -->
+                            <div class="type-option {% if form.message_type.data == 'Clinical Notes (SFTP)' %}selected{% endif %}">
+                                <input type="radio" name="message_type" value="Clinical Notes (SFTP)" id="CLINICAL" 
+                                       class="stream-type-radio"
+                                       {% if form.message_type.data == 'Clinical Notes (SFTP)' %}checked{% endif %}>
+                                <label for="CLINICAL" class="stream-type-label">
+                                    <div class="type-icon clinical-notes-icon"></div>
+                                    <h3>Clinical Notes (SFTP)</h3>
+                                    <p>Connect to Clinical Notes SFTP source</p>
+                                </label>
+                            </div>
                         </div>
                     </div>
+
                     <div class="form-actions">
                         <a href="{{ url_for('streams.view_streams') }}" class="btn btn-secondary">Cancel</a>
                         <button type="submit" class="btn btn-primary">Next</button>
@@ -41,29 +113,23 @@
         {% endif %}
     </div>
 </div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
-    document.addEventListener('DOMContentLoaded', function() {
-        const form = document.querySelector('form');
-        const submitButton = form.querySelector('button[type="submit"]');
-
-        form.addEventListener('submit', function(e) {
-            if (!form.querySelector('input[name="message_type"]:checked')) {
-                e.preventDefault();
-                alert('Please select a message type before proceeding.');
-            }
-        });
-
-        form.querySelectorAll('input[name="message_type"]').forEach(function(radio) {
-            radio.addEventListener('change', function() {
-                submitButton.disabled = false;
+document.addEventListener('DOMContentLoaded', function() {
+    const typeOptions = document.querySelectorAll('.type-option');
+    typeOptions.forEach(option => {
+        if (!option.querySelector('input[disabled]')) {
+            option.addEventListener('click', function() {
+                const radio = this.querySelector('input[type="radio"]');
+                if (radio) {
+                    radio.checked = true;
+                }
             });
-        });
-
-        // Initially disable the submit button
-        submitButton.disabled = true;
+        }
     });
+});
 </script>
 {% endblock %}
