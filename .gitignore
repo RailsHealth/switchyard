@@ -144,3 +144,5 @@ celerybeat-schedule.db
 dump.rdb
 production.py
 
+flower.db
+
