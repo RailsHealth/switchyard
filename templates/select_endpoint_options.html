@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Configure Endpoint - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="endpoint-options-container">
+        <h1>New Endpoint</h1>
+        <p class="endpoint-options-subtitle">Create a new endpoint to send or receive data, or select from pre-configured endpoints</p>
+
+        <div class="endpoint-options-breadcrumb">
+            <a href="{{ url_for('endpoints.view_endpoints') }}">Endpoints</a> / 
+            <a href="{{ url_for('endpoints.create_endpoint') }}">New Endpoint</a> / 
+            {{ mode|title }} Endpoint
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="endpoint-options-form">
+                <h2>Endpoint Mode: {{ mode|title }}</h2>
+
+                <form method="POST" action="{{ url_for('endpoints.select_endpoint_options', mode=mode) }}" id="endpoint-options-form">
+                    {{ form.hidden_tag() }}
+
+                    <div class="endpoint-options-field">
+                        <label for="message_type">Message Type</label>
+                        <div class="endpoint-select-wrapper">
+                            {{ form.message_type(class="endpoint-select", placeholder="Select message type") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-options-field" id="endpoint-type-section" style="display: none;">
+                        <label for="endpoint_type">Endpoint Type</label>
+                        <div class="endpoint-select-wrapper">
+                            {{ form.endpoint_type(class="endpoint-select", placeholder="Select endpoint type") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-options-actions">
+                        <a href="{{ url_for('endpoints.create_endpoint') }}" class="endpoint-btn endpoint-btn-secondary">Back</a>
+                        <button type="submit" class="endpoint-btn endpoint-btn-primary" id="next-btn" disabled>Next</button>
+                    </div>
+                </form>
+            </div>
+
+        {% else %}
+            <div class="endpoint-options-error">
+                You do not have permission to create endpoints. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const messageTypeSelect = document.getElementById('message_type');
+    const endpointTypeSelect = document.getElementById('endpoint_type');
+    const endpointTypeSection = document.getElementById('endpoint-type-section');
+    const nextBtn = document.getElementById('next-btn');
+    const form = document.getElementById('endpoint-options-form');
+
+    // Helper to update endpoint types based on selected message type
+    function updateEndpointTypes() {
+    if (messageTypeSelect.value) {
+        fetch(`/endpoints/ajax/endpoint_types/{{ mode }}/${messageTypeSelect.value}`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    endpointTypeSelect.innerHTML = '<option value="">Select endpoint type</option>';
+                    data.endpoint_types.forEach(type => {
+                        const option = document.createElement('option');
+                        option.value = type.value;
+                        option.textContent = type.label;
+                        if (type.coming_soon) {
+                            option.disabled = true;
+                            option.textContent += ' (coming soon)';
+                            option.classList.add('coming-soon');
+                        }
+                        endpointTypeSelect.appendChild(option);
+                    });
+                    endpointTypeSection.style.display = 'block';
+                    updateNextButton();
+                } else {
+                    console.error('Error fetching endpoint types:', data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+            });
+    } else {
+        endpointTypeSection.style.display = 'none';
+        endpointTypeSelect.innerHTML = '<option value="">Select message type first</option>';
+        updateNextButton();
+    }
+}
+
+    // Enable/disable next button based on selections
+    function updateNextButton() {
+        nextBtn.disabled = !(messageTypeSelect.value && endpointTypeSelect.value);
+    }
+
+    // Event listeners
+    messageTypeSelect.addEventListener('change', updateEndpointTypes);
+    endpointTypeSelect.addEventListener('change', updateNextButton);
+
+    // Form submission
+    form.addEventListener('submit', function(e) {
+        e.preventDefault();  // Always prevent default first
+        
+        const messageType = messageTypeSelect.value;
+        const endpointType = endpointTypeSelect.value;
+        
+        if (!messageType || !endpointType) {
+            alert('Please select both message type and endpoint type');
+            return;
+        }
+        
+        // Log the values being submitted
+        console.log('Submitting form with:', {
+            messageType: messageType,
+            endpointType: endpointType
+        });
+
+        // Create form data and submit
+        const formData = new FormData(form);
+        fetch(form.action, {
+            method: 'POST',
+            body: formData,
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                window.location.href = data.redirect;
+            } else {
+                alert(data.message || 'Error processing form');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('Error submitting form');
+        });
+    });
+});
+</script>
+{% endblock %}

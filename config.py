@@ -37,6 +37,7 @@ class Config:
 
     # Test HL7 Service Configuration
     TEST_HL7_SERVICE_URL = os.getenv('TEST_HL7_SERVICE_URL', 'http://localhost:8001')
+    TEST_HL7_SERVICE_HOST = os.getenv('TEST_HL7_SERVICE_MLLP_HOST', 'localhost') # possibly redundant
     TEST_HL7_SERVICE_MLLP_HOST = os.getenv('TEST_HL7_SERVICE_MLLP_HOST', 'localhost')
     TEST_HL7_SERVICE_API_KEY = os.getenv('TEST_HL7_SERVICE_API_KEY', 'your-api-key-here')
     TEST_HL7_ENABLED = os.getenv('TEST_HL7_ENABLED', 'True') == 'True'
@@ -180,10 +181,360 @@ class Config:
     FHIR_VALIDATION_ENABLED = os.environ.get('FHIR_VALIDATION_ENABLED', 'True') == 'True'
     FHIR_VALIDATION_SERVER = os.environ.get('FHIR_VALIDATION_SERVER', 'http://hapi.fhir.org/baseR4')
 
+    # Endpoint Configuration
+    ENDPOINT_MODES = ['source', 'destination']
+    
+    # Mapping of message types to available endpoint types for each mode
+    ENDPOINT_MAPPINGS = {
+        'source': {
+            'HL7v2': ['mllp'],  
+            'CCDA': ['sftp'],
+            'X12': ['sftp'],
+            'Clinical Notes': ['sftp']
+        },
+        'destination': {
+            'HL7v2 in JSON': ['aws_s3', 'gcp_storage'],
+            'CCDA in JSON': ['aws_s3', 'gcp_storage'],
+            'X12 in JSON': ['aws_s3', 'gcp_storage'],
+            'Clinical Notes in JSON': ['aws_s3', 'gcp_storage']
+        }
+    }
+
+    # Test endpoint configurations
+    TEST_ENDPOINTS = {
+        'HL7v2': {
+            'name': 'Test HL7v2 Server',
+            'description': 'Simulates an HL7v2 endpoint receiving a random HL7v2 message once every 2 seconds. Data generated using simhospital.',
+            'mode': 'source'
+        },
+        'FHIR': {
+            'firely': {
+                'name': 'Firely FHIR Server',
+                'description': 'Connect to the public FHIR server maintained by Firely. Once switched ON, it starts receiving data from the server.',
+                'mode': 'source'
+            },
+            'hapi': {
+                'name': 'HAPI FHIR Server',
+                'description': 'Connect to the public FHIR server maintained by HAPI. Once switched ON, it starts receiving data from the server.',
+                'mode': 'source'
+            }
+        }
+    }
+
+    # Endpoint type-specific configurations
+    ENDPOINT_TYPE_CONFIGS = {
+        'mllp': {
+            'default_timeout': 60,
+            'max_connections': 10,
+            'required_fields': ['host', 'port', 'timeout']
+        },
+        'sftp': {
+            'default_fetch_interval': 600,  # 10 minutes
+            'max_file_size': 100 * 1024 * 1024,  # 100MB
+            'supported_auth_methods': ['password', 'key'],
+            'required_fields': ['host', 'port', 'username', 'remote_path']
+        },
+        'aws_s3': {
+            'regions': [
+                'us-east-1', 'us-east-2', 'us-west-1', 'us-west-2',
+                'eu-west-1', 'eu-west-2', 'eu-central-1',
+                'ap-southeast-1', 'ap-southeast-2', 'ap-northeast-1'
+            ],
+            'required_fields': ['bucket', 'region', 'aws_access_key_id', 'aws_secret_access_key']
+        },
+        'gcp_storage': {
+            'required_fields': ['bucket', 'project_id', 'credentials_json']
+        }
+    }
+
+    # Coming soon features
+    COMING_SOON_FEATURES = {
+        'endpoint_types': {
+            'mllp_ipsec': 'MLLP with IPSec support',
+            'https': 'HTTPS endpoints for FHIR servers'
+        }
+    }
+
+    # Endpoint validation settings
+    ENDPOINT_VALIDATION = {
+        'name_max_length': 100,
+        'max_endpoints_per_org': 50,
+        'allowed_file_extensions': {
+            'CCDA': ['.xml', '.ccda', '.pdf'],
+            'X12': ['.x12', '.txt', '.pdf'],
+            'Clinical Notes': ['.txt', '.pdf']
+        }
+    }
+
+    # Cloud storage settings
+    CLOUD_STORAGE = {
+        'providers': {
+            'aws_s3': {
+                'name': 'AWS S3',
+                'encryption_options': {
+                    'none': 'No encryption',
+                    'AES256': 'Server-side encryption with S3-managed keys'
+                },
+                'required_fields': ['bucket', 'region', 'aws_access_key_id', 'aws_secret_access_key'],
+                'validation': {
+                    'bucket_name_pattern': r'^[a-z0-9][a-z0-9.-]*[a-z0-9]$'
+                }
+            },
+            'gcp_storage': {
+                'name': 'Google Cloud Storage',
+                'encryption_options': {
+                    'none': 'No encryption',
+                    'google-managed': 'Google-managed encryption'
+                },
+                'required_fields': ['bucket', 'project_id', 'credentials_json'],
+                'validation': {
+                    'bucket_name_pattern': r'^[a-z0-9][a-z0-9-_.]*[a-z0-9]$'
+                }
+            }
+        },
+        'upload_settings': {
+            'max_file_size': 5 * 1024 * 1024 * 1024,  # 5GB
+            'multipart_threshold': 100 * 1024 * 1024,  # 100MB
+            'max_concurrent_uploads': 10,
+            'retry_attempts': 3
+        }
+    }
+
+    # Default settings for endpoint creation
+    DEFAULT_ENDPOINT_SETTINGS = {
+        'deidentification_requested': False,
+        'purging_requested': False,
+        'retry_attempts': 3,
+        'retry_delay': 5,  # seconds
+        'connection_timeout': 30  # seconds
+    }
+
+    # Message type display names
+    MESSAGE_TYPE_DISPLAY = {
+        # Source formats
+        'HL7v2': 'HL7v2',
+        'CCDA': 'CCDA (supports PDF only)',
+        'X12': 'X12 (supports PDF only)',
+        'Clinical Notes': 'Clinical Notes (supports PDF only)',
+        
+        # Destination formats
+        'HL7v2 in JSON': 'HL7v2 (JSON)',
+        'CCDA in JSON': 'CCDA (JSON)',
+        'X12 in JSON': 'X12 (JSON)',
+        'Clinical Notes in JSON': 'Clinical Notes (JSON)'
+    }
+
+    # Message type descriptions (optional but helpful for UI)
+    MESSAGE_TYPE_DESCRIPTIONS = {
+        # Source formats
+        'HL7v2': 'Health Level 7 Version 2 messages via MLLP',
+        'CCDA': 'Consolidated Clinical Document Architecture documents (PDF)',
+        'X12': 'X12 EDI documents (PDF)',
+        'Clinical Notes': 'Clinical documentation and notes (PDF)',
+        
+        # Destination formats
+        'HL7v2 in JSON': 'HL7v2 messages wrapped in JSON for cloud storage',
+        'CCDA in JSON': 'CCDA content wrapped in JSON for cloud storage',
+        'X12 in JSON': 'X12 content wrapped in JSON for cloud storage',
+        'Clinical Notes in JSON': 'Clinical Notes content wrapped in JSON for cloud storage'
+    }
+
+    # Endpoint mode display names and descriptions
+    ENDPOINT_MODE_INFO = {
+        'source': {
+            'name': 'Source',
+            'description': 'This endpoint sends data. Currently supports MLLP for HL7v2 and SFTP for PDF files.'
+        },
+        'destination': {
+            'name': 'Destination',
+            'description': 'This endpoint receives data. Currently supports AWS S3-SSE, Google Cloud Storage-SSE.'
+        }
+    }
+
+    # Endpoint status mappings
+    ENDPOINT_STATUS = {
+        'active': 'Active',
+        'inactive': 'Inactive',
+        'starting': 'Starting',
+        'stopping': 'Stopping',
+        'error': 'Error'
+    }
+
+    # Control action mappings
+    ENDPOINT_ACTIONS = {
+        'start': 'Start',
+        'stop': 'Stop',
+        'pause': 'Pause',
+        'resume': 'Resume'
+    }
+
+    # Organization level endpoint limits
+    ORGANIZATION_ENDPOINT_LIMITS = {
+        'max_active_endpoints': 20,
+        'max_test_endpoints': 3,
+        'max_storage_per_endpoint': 1024 * 1024 * 1024  # 1GB
+    }
+
     # Rate limiting
     RATELIMIT_ENABLED = True
     RATELIMIT_STORAGE_URL = REDIS_URL
     RATELIMIT_DEFAULT = "200 per day;50 per hour;1 per second"
+
+    # StreamsV2 Configuration
+    STREAMSV2_QUEUE_PREFIX = "streamv2"
+    STREAMSV2_PROCESSING_INTERVAL = 60  # Process each stream every minute
+    STREAMSV2_BATCH_SIZE = 100  # Number of messages to process in each batch
+    STREAMSV2_MAX_RETRIES = 3
+    STREAMSV2_RETRY_DELAY = 5  # seconds
+    
+    # StreamsV2 Cleanup Settings
+    STREAMSV2_CLEANUP_INTERVAL = 86400  # 24 hours
+    STREAMSV2_RECORD_RETENTION_DAYS = 30
+    
+    # StreamsV2 Message Format Settings
+    STREAMSV2_MESSAGE_TYPES = {
+        'source': {
+            'HL7v2': {
+                'content_type': 'text/plain',
+                'allowed_endpoints': ['mllp'],
+                'destination_format': 'HL7v2 in JSON'
+            },
+            'CCDA': {
+                'content_type': 'text/plain',
+                'allowed_endpoints': ['sftp'],
+                'destination_format': 'CCDA in JSON'
+            },
+            'X12': {
+                'content_type': 'text/plain',
+                'allowed_endpoints': ['sftp'],
+                'destination_format': 'X12 in JSON'
+            },
+            'Clinical Notes': {
+                'content_type': 'text/plain',
+                'allowed_endpoints': ['sftp'],
+                'destination_format': 'Clinical Notes in JSON'
+            }
+        },
+        'destination': {
+            'HL7v2 in JSON': {
+                'content_type': 'application/json',
+                'allowed_endpoints': ['aws_s3', 'gcp_storage'],
+                'source_type': 'HL7v2'
+            },
+            'CCDA in JSON': {
+                'content_type': 'application/json',
+                'allowed_endpoints': ['aws_s3', 'gcp_storage'],
+                'source_type': 'CCDA'
+            },
+            'X12 in JSON': {
+                'content_type': 'application/json',
+                'allowed_endpoints': ['aws_s3', 'gcp_storage'],
+                'source_type': 'X12'
+            },
+            'Clinical Notes in JSON': {
+                'content_type': 'application/json',
+                'allowed_endpoints': ['aws_s3', 'gcp_storage'],
+                'source_type': 'Clinical Notes'
+            }
+        }
+    }
+    
+    # StreamsV2 Storage Settings
+    STREAMSV2_STORAGE_CONFIG = {
+        'temp_dir': '/tmp/streamsv2',
+        'file_prefix': 'stream_',
+        'max_file_size': 10 * 1024 * 1024  # 10MB
+    }
+    
+    # StreamsV2 Queue Configuration
+    STREAMSV2_TASK_ROUTES = {
+        'tasks.process_stream_messages': {'queue': 'stream_processing'},
+        'tasks.monitor_streams': {'queue': 'stream_monitoring'},
+        'tasks.cleanup_stream_processed_messages': {'queue': 'stream_maintenance'}
+    }
+    
+    STREAMSV2_BEAT_SCHEDULE = {
+        'monitor-streams': {
+            'task': 'tasks.monitor_streams',
+            'schedule': STREAMSV2_PROCESSING_INTERVAL,
+            'options': {'queue': 'stream_monitoring'}
+        },
+        'cleanup-stream-processed-messages': {
+            'task': 'tasks.cleanup_stream_processed_messages',
+            'schedule': STREAMSV2_CLEANUP_INTERVAL,
+            'kwargs': {'days': STREAMSV2_RECORD_RETENTION_DAYS},
+            'options': {'queue': 'stream_maintenance'}
+        }
+    }
+    
+    # StreamsV2 Monitoring Settings
+    STREAMSV2_METRICS = {
+        'collection_interval': 300,  # 5 minutes
+        'retention_period': 7 * 24 * 60 * 60,  # 7 days
+        'alert_thresholds': {
+            'error_rate': 0.1,  # Alert if error rate exceeds 10%
+            'processing_delay': 300  # Alert if processing delay exceeds 5 minutes
+        }
+    }
+    
+    # Update existing CELERY_TASK_ROUTES with StreamsV2 routes
+    CELERY_TASK_ROUTES.update(STREAMSV2_TASK_ROUTES)
+    
+    STREAMSV2_BEAT_SCHEDULE = {
+        'monitor-streams': {
+            'task': 'tasks.monitor_streams',
+            'schedule': STREAMSV2_PROCESSING_INTERVAL,
+            'options': {'queue': 'stream_monitoring'}
+        },
+        'cleanup-stream-processed-messages': {
+            'task': 'tasks.cleanup_stream_processed_messages',
+            'schedule': STREAMSV2_CLEANUP_INTERVAL,
+            'kwargs': {'days': STREAMSV2_RECORD_RETENTION_DAYS},
+            'options': {'queue': 'stream_maintenance'}
+        }
+    }
+    
+    # StreamsV2 Endpoint Type Mappings
+    STREAMSV2_ENDPOINT_MAPPINGS = {
+        'source': {
+            'mllp': {
+                'supported_types': ['HL7v2'],
+                'output_format': 'HL7v2 in JSON'
+            },
+            'sftp': {
+                'supported_types': ['CCDA', 'X12', 'Clinical Notes'],
+                'output_format': '{type} in JSON'  # Gets formatted with the type
+            }
+        },
+        'destination': {
+            'aws_s3': {
+                'supported_types': [
+                    'HL7v2 in JSON',
+                    'CCDA in JSON',
+                    'X12 in JSON',
+                    'Clinical Notes in JSON'
+                ],
+                'required_config': ['bucket', 'region', 'access_key', 'secret_key']
+            },
+            'gcp_storage': {
+                'supported_types': [
+                    'HL7v2 in JSON',
+                    'CCDA in JSON',
+                    'X12 in JSON',
+                    'Clinical Notes in JSON'
+                ],
+                'required_config': ['bucket', 'project_id', 'credentials']
+            }
+        }
+    }
+
+    # StreamsV2 Status Constants
+    STREAMSV2_STATUS = {
+        'ACTIVE': 'active',
+        'INACTIVE': 'inactive',
+        'ERROR': 'error',
+        'DELETED': 'deleted'
+    }
 
     @classmethod
     def print_celery_config(cls):

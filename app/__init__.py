@@ -117,15 +117,26 @@ def create_app(config_class=Config):
         initialize_fhir_interfaces()
 
     # Register blueprints
-    from app.routes import main, streams, messages, logs, organizations, accounts
+    from app.routes import (
+        main, messages, logs, organizations, 
+        accounts, templates, settings, endpoints, orgs
+    )
+    from app.routes.streamsv2 import bp as streamsv2_bp
     from app.auth import bp as auth_bp
+    
     app.register_blueprint(main.bp)
     app.register_blueprint(auth_bp)
-    app.register_blueprint(streams.bp, url_prefix='/streams')
+    # Register streamsv2_bp with the correct URL prefix
+    app.register_blueprint(streamsv2_bp)  # Remove the url_prefix='/streams'
     app.register_blueprint(messages.bp, url_prefix='/messages')
     app.register_blueprint(logs.bp, url_prefix='/logs')
     app.register_blueprint(organizations.bp, url_prefix='/organizations')
     app.register_blueprint(accounts.bp, url_prefix='/accounts')
+    app.register_blueprint(endpoints.bp, url_prefix='/endpoints')
+    app.register_blueprint(templates.bp, url_prefix='/templates')
+    app.register_blueprint(settings.bp, url_prefix='/settings')
+    app.register_blueprint(orgs.bp, url_prefix='/orgs')
+
 
     # Initialize MongoDB collections
     with app.app_context():

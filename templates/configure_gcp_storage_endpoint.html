@@ -1,0 +1,139 @@
+{% extends "base.html" %}
+{% block title %}Configure GCP Storage Endpoint - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="endpoint-config-container">
+        <h1>New Endpoint</h1>
+        <p class="endpoint-config-subtitle">Create a new endpoint to send or receive data, or select from pre-configured endpoints</p>
+
+        <div class="endpoint-config-breadcrumb">
+            <a href="{{ url_for('endpoints.view_endpoints') }}">Endpoints</a> / 
+            <a href="{{ url_for('endpoints.create_endpoint') }}">New Endpoint</a> /
+            <a href="{{ url_for('endpoints.select_endpoint_options', mode=mode) }}">{{ mode|title }} Endpoint</a> /
+            Configure GCP Storage
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="endpoint-config-form">
+                <h2>Configure Google Cloud Storage Details</h2>
+                <p class="endpoint-config-path">Endpoints/{{ mode|title }} Endpoint/GCP Storage Configuration</p>
+
+                <form method="POST" action="{{ url_for('endpoints.configure_endpoint', mode=mode, message_type=message_type, endpoint_type='gcp_storage') }}" id="gcp-config-form">
+                    {{ form.csrf_token }}
+                    
+                    <div class="endpoint-config-field">
+                        <label for="name">Endpoint Name</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.name(class="endpoint-input", placeholder="Enter endpoint name") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="gcp_bucket">Bucket Name</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.gcp_bucket(class="endpoint-input", placeholder="my-healthcare-data-bucket") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="gcp_project_id">Project ID</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.gcp_project_id(class="endpoint-input", placeholder="Enter GCP project ID") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="gcp_credentials">Service Account Credentials</label>
+                        <div class="endpoint-input-wrapper code-input">
+                            {{ form.gcp_credentials(class="endpoint-input", placeholder='Paste service account JSON credentials') }}
+                            <button type="button" class="format-json" aria-label="Format JSON">
+                                Format
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field endpoint-toggle-field">
+                        {{ form.gcp_encryption(class="endpoint-toggle") }}
+                        <label for="gcp_encryption">Enable Server-Side Encryption</label>
+                        <span class="endpoint-toggle-hint">Uses Google-managed encryption keys</span>
+                    </div>
+
+                    <div class="endpoint-config-actions">
+                        <a href="{{ url_for('endpoints.select_endpoint_options', mode=mode) }}" class="endpoint-btn endpoint-btn-secondary">Back</a>
+                        <button type="submit" class="endpoint-btn endpoint-btn-primary">Save Endpoint</button>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="endpoint-config-error">
+                You do not have permission to configure endpoints. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('gcp-config-form');
+    const inputs = form.querySelectorAll('.endpoint-input');
+    
+    // JSON formatting
+    const formatButton = document.querySelector('.format-json');
+    const credentialsInput = document.getElementById('gcp_credentials');
+    
+    if (formatButton && credentialsInput) {
+        formatButton.addEventListener('click', function() {
+            try {
+                const jsonData = JSON.parse(credentialsInput.value);
+                credentialsInput.value = JSON.stringify(jsonData, null, 2);
+            } catch (e) {
+                // Invalid JSON - leave as is
+            }
+        });
+    }
+
+    // Form validation
+    form.addEventListener('submit', function(e) {
+        let isValid = true;
+
+        inputs.forEach(input => {
+            if (input.required && input.value.trim() === '') {
+                input.classList.add('endpoint-input-error');
+                isValid = false;
+            }
+        });
+
+        // Validate bucket name format
+        const bucketName = document.getElementById('gcp_bucket').value;
+        if (bucketName && !/^[a-z0-9][a-z0-9-_.]*[a-z0-9]$/.test(bucketName)) {
+            document.getElementById('gcp_bucket').classList.add('endpoint-input-error');
+            isValid = false;
+        }
+
+        // Validate JSON credentials
+        const credentials = document.getElementById('gcp_credentials').value;
+        if (credentials) {
+            try {
+                JSON.parse(credentials);
+            } catch (e) {
+                document.getElementById('gcp_credentials').classList.add('endpoint-input-error');
+                isValid = false;
+            }
+        }
+
+        if (!isValid) {
+            e.preventDefault();
+        }
+    });
+
+    // Remove error class on input
+    inputs.forEach(input => {
+        input.addEventListener('input', function() {
+            this.classList.remove('endpoint-input-error');
+        });
+    });
+});
+</script>
+{% endblock %}

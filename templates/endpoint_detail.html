@@ -1,0 +1,287 @@
+{% extends "base.html" %}
+{% block title %}{{ endpoint.name }} - Rails Health Interface{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="content-container">
+        <div class="endpoint-header">
+            <div class="title-container">
+                <h1>{{ endpoint.name }}</h1>
+                <p class="subtitle">View, manage and configured endpoint details</p>
+               
+                <div class="endpoint-breadcrumb">
+                    <a href="{{ url_for('endpoints.view_endpoints') }}">Endpoints</a>/
+                    <a href="{{ url_for('endpoints.view_endpoints') }}">View Endpoints</a>/
+                    <span>{{ endpoint.name }}</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metrics Dashboard -->
+        <div class="metrics-dashboard">
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.get('messages_received', 0) if endpoint.mode == 'source' else metrics.get('messages_sent', 0) }}</div>
+                <div class="metric-label">messages {{ 'received' if endpoint.mode == 'source' else 'sent' }} today</div>
+                <a href="{{ url_for('messages.view_messages', endpoint_uuid=endpoint.uuid) }}" class="metric-link">view messages</a>
+            </div>
+            <div class="metric-card">
+                <div class="metric-value">{{ metrics.get('errors', 0) }}</div>
+                <div class="metric-label">errors</div>
+                <a href="{{ url_for('logs.view_logs', endpoint_uuid=endpoint.uuid) }}" class="metric-link">view logs</a>
+            </div>
+        </div>
+
+        <!-- Information Sections -->
+        <div class="info-sections">
+            <!-- Basic Information -->
+            <div class="info-section">
+                <h2>Basic Information</h2>
+                <div class="basic-info-grid">
+                    <div class="info-item">
+                        <label>Mode</label>
+                        <span>{{ endpoint.mode|title }}</span>
+                    </div>
+                    <div class="info-item">
+                        <label>Message Type</label>
+                        <span>{{ endpoint.message_type }}</span>
+                    </div>
+                    <div class="info-item">
+                        <label>Endpoint Type</label>
+                        <span>{{ endpoint.endpoint_type|upper }}</span>
+                    </div>
+                    <div class="info-item">
+                        <label>Created at</label>
+                        <span>{{ endpoint.created_at|datetime }}</span>
+                    </div>
+                    <div class="info-item">
+                        <label>Status</label>
+                        <span>{{ endpoint.status }}</span>
+                    </div>
+                    {% if endpoint.last_active %}
+                    <div class="info-item">
+                        <label>Last Active</label>
+                        <span>{{ endpoint.last_active|datetime }}</span>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <!-- Configuration Section - Different for each endpoint type -->
+            <div class="info-section">
+                <h2>Configuration</h2>
+                <div class="config-grid">
+                    {% if endpoint.endpoint_type == 'mllp' %}
+                        <div class="info-item">
+                            <label>Host</label>
+                            <span>{{ endpoint.host }}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Port</label>
+                            <span>{{ endpoint.port }}</span>
+                        </div>
+                        {% if endpoint.timeout %}
+                        <div class="info-item">
+                            <label>Timeout</label>
+                            <span>{{ endpoint.timeout }} seconds</span>
+                        </div>
+                        {% endif %}
+                    {% elif endpoint.endpoint_type == 'sftp' %}
+                        <div class="info-item">
+                            <label>Host</label>
+                            <span>{{ endpoint.host }}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Port</label>
+                            <span>{{ endpoint.port }}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Username</label>
+                            <span>{{ endpoint.username }}</span>
+                        </div>
+                        <div class="info-item">
+                            <label>Remote Path</label>
+                            <span>{{ endpoint.remote_path }}</span>
+                        </div>
+                    {% elif endpoint.endpoint_type in ['aws_s3', 'gcp_storage'] and endpoint.storage_config %}
+                        <div class="info-item">
+                            <label>Bucket</label>
+                            <span>{{ endpoint.storage_config.bucket }}</span>
+                        </div>
+                        {% if endpoint.storage_config.project_id %}
+                        <div class="info-item">
+                            <label>Project ID</label>
+                            <span>{{ endpoint.storage_config.project_id }}</span>
+                        </div>
+                        {% endif %}
+                        {% if endpoint.storage_config.region %}
+                        <div class="info-item">
+                            <label>Region</label>
+                            <span>{{ endpoint.storage_config.region }}</span>
+                        </div>
+                        {% endif %}
+                        <div class="info-item">
+                            <label>Encryption</label>
+                            <span>{{ endpoint.storage_config.encryption.type|default('None')|title }}</span>
+                        </div>
+                    {% elif endpoint.endpoint_type == 'https' %}
+                        <div class="info-item">
+                            <label>Base URL</label>
+                            <span>{{ endpoint.base_url }}</span>
+                        </div>
+                        {% if endpoint.server_type %}
+                        <div class="info-item">
+                            <label>Server Type</label>
+                            <span>{{ endpoint.server_type|title }}</span>
+                        </div>
+                        {% endif %}
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+
+        <!-- Action Buttons -->
+        <div class="endpoint-actions">
+            {% if endpoint.status != "ACTIVE" %}
+                <button class="btn btn-primary start-endpoint" 
+                        data-endpoint-id="{{ endpoint.uuid }}"
+                        {% if endpoint.status == "STARTING" %}disabled{% endif %}>
+                    Start
+                </button>
+            {% else %}
+                <button class="btn btn-secondary stop-endpoint" 
+                        data-endpoint-id="{{ endpoint.uuid }}"
+                        {% if endpoint.status == "STOPPING" %}disabled{% endif %}>
+                    Stop
+                </button>
+            {% endif %}
+            <button class="btn btn-danger delete-endpoint" data-endpoint-id="{{ endpoint.uuid }}">
+                Delete Endpoint
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- Delete Confirmation Modal -->
+<div class="modal" id="deleteModal">
+    <div class="modal-content">
+        <h3>Delete Endpoint</h3>
+        <p>Are you sure you want to delete this endpoint? This action cannot be undone.</p>
+        <div class="modal-actions">
+            <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
+            <button class="btn btn-danger" onclick="confirmDelete()">Delete</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Start/Stop endpoint functionality
+    const startButton = document.querySelector('.btn-primary.start-endpoint');
+    const stopButton = document.querySelector('.btn-secondary.stop-endpoint');
+    const deleteButton = document.querySelector('.btn-danger.delete-endpoint');
+    const deleteModal = document.getElementById('deleteModal');
+    let endpointToDelete = null;
+
+    // Start endpoint
+    if (startButton) {
+        startButton.addEventListener('click', function() {
+            const endpointId = this.dataset.endpointId;
+            handleEndpointAction('start', endpointId, this);
+        });
+    }
+
+    // Stop endpoint
+    if (stopButton) {
+        stopButton.addEventListener('click', function() {
+            const endpointId = this.dataset.endpointId;
+            handleEndpointAction('stop', endpointId, this);
+        });
+    }
+
+    // Delete endpoint
+    if (deleteButton) {
+        deleteButton.addEventListener('click', function() {
+            endpointToDelete = this.dataset.endpointId;
+            showDeleteModal();
+        });
+    }
+
+    function handleEndpointAction(action, endpointId, button) {
+        button.disabled = true;
+        button.textContent = action === 'start' ? 'Starting...' : 'Stopping...';
+
+        fetch(`/endpoints/${endpointId}/${action}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.status === 'success' || data.status === 'warning') {
+                window.location.reload();
+            } else {
+                throw new Error(data.message || 'Operation failed');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while performing the action');
+            button.disabled = false;
+            button.textContent = action === 'start' ? 'Start' : 'Stop';
+        });
+    }
+
+    // Delete modal functions
+    function showDeleteModal() {
+        deleteModal.style.display = 'flex';
+    }
+
+    window.closeDeleteModal = function() {
+        deleteModal.style.display = 'none';
+        endpointToDelete = null;
+    }
+
+    window.confirmDelete = function() {
+        if (!endpointToDelete) return;
+
+        fetch(`/endpoints/${endpointToDelete}/delete`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.status === 'success') {
+                window.location.href = "{{ url_for('endpoints.view_endpoints') }}";
+            } else {
+                throw new Error(data.message || 'Delete operation failed');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while deleting the endpoint');
+        })
+        .finally(() => {
+            closeDeleteModal();
+        });
+    };
+
+    // Close modal when clicking outside
+    deleteModal.addEventListener('click', function(e) {
+        if (e.target === deleteModal) {
+            closeDeleteModal();
+        }
+    });
+});
+</script>
+{% endblock %}

@@ -45,16 +45,20 @@ def view_messages():
         return redirect(url_for('organizations.list_organizations'))
 
     form = MessageFilterForm()
-    streams = list(mongo.db.streams.find({"organization_uuid": g.organization['uuid']}, {'name': 1, 'uuid': 1, 'message_type': 1}))
+    # Get endpoints instead of streams
+    endpoints = list(mongo.db.endpoints.find(
+        {"organization_uuid": g.organization['uuid']}, 
+        {'name': 1, 'uuid': 1, 'message_type': 1}
+    ))
     
     page = int(request.args.get('page', 1))
     per_page = 20
-    selected_stream_uuid = request.args.get('stream_uuid')
+    selected_endpoint_uuid = request.args.get('endpoint_uuid')
     message_type = request.args.get('type', 'all')
 
     query = {"organization_uuid": g.organization['uuid']}
-    if selected_stream_uuid:
-        query["stream_uuid"] = selected_stream_uuid
+    if selected_endpoint_uuid:
+        query["endpoint_uuid"] = selected_endpoint_uuid
     if message_type != 'all':
         query["type"] = message_type
     else:
@@ -81,8 +85,8 @@ def view_messages():
         else:
             date_str = message_date.strftime('%Y-%m-%d')
         
-        stream = next((s for s in streams if s['uuid'] == message['stream_uuid']), None)
-        message['stream_name'] = stream['name'] if stream else 'Unknown Stream'
+        endpoint = next((e for e in endpoints if e['uuid'] == message['endpoint_uuid']), None)
+        message['endpoint_name'] = endpoint['name'] if endpoint else 'Unknown Endpoint'
         
         if isinstance(message['message'], dict):
             message['message'] = str(message['message'])
@@ -95,15 +99,16 @@ def view_messages():
         
         grouped_messages[date_str].append(message)
 
-    form = MessageForm()  # Create an instance of the form
-    return render_template('view_messages.html', 
-                           form=form,
-                           grouped_messages=grouped_messages, 
-                           streams=streams, 
-                           selected_stream_uuid=selected_stream_uuid, 
-                           message_type=message_type,
-                           page=page, 
-                           total_pages=total_pages)
+    return render_template(
+        'view_messages.html',
+        form=form,
+        grouped_messages=grouped_messages,
+        endpoints=endpoints,  # Changed from streams to endpoints
+        selected_endpoint_uuid=selected_endpoint_uuid,  # Changed from stream_uuid
+        message_type=message_type,
+        page=page,
+        total_pages=total_pages
+    )
 
 @bp.route('/create', methods=['POST'])
 @login_required
@@ -115,34 +120,38 @@ def create_message():
             message_type = form.message_type.data
             message_content = form.message_content.data
             
-            # Find or create the "Pasted Messages" stream for the current organization
-            pasted_stream = mongo.db.streams.find_one({
+            # Find or create the "Pasted Messages" endpoint for the current organization
+            pasted_endpoint = mongo.db.endpoints.find_one({
                 "name": "Pasted Messages",
                 "organization_uuid": g.organization['uuid']
             })
             
-            if not pasted_stream:
-                # Create the "Pasted Messages" stream if it doesn't exist for this organization
-                pasted_stream = {
+            if not pasted_endpoint:
+                # Create the "Pasted Messages" endpoint if it doesn't exist
+                pasted_endpoint = {
                     "uuid": str(uuid.uuid4()),
                     "name": "Pasted Messages",
                     "message_type": "Mixed",
-                    "connection_type": "pasted",
+                    "endpoint_type": "pasted",
+                    "mode": "source",
                     "active": True,
                     "created_at": datetime.utcnow(),
                     "updated_at": datetime.utcnow(),
                     "deleted": False,
                     "is_default": True,
-                    "files_processed": 0,
-                    "organization_uuid": g.organization['uuid']
+                    "organization_uuid": g.organization['uuid'],
+                    "status": "inactive",
+                    "metadata": {
+                        "created_by": g.user['email']
+                    }
                 }
-                mongo.db.streams.insert_one(pasted_stream)
-                current_app.logger.info(f"Created 'Pasted Messages' stream for organization {g.organization['uuid']}")
+                mongo.db.endpoints.insert_one(pasted_endpoint)
+                current_app.logger.info(f"Created 'Pasted Messages' endpoint for organization {g.organization['uuid']}")
             
             message_uuid = str(uuid.uuid4())
             message = {
                 "uuid": message_uuid,
-                "stream_uuid": pasted_stream['uuid'],
+                "endpoint_uuid": pasted_endpoint['uuid'],  # Changed from stream_uuid
                 "organization_uuid": g.organization['uuid'],
                 "message": message_content,
                 "type": message_type,
@@ -154,12 +163,14 @@ def create_message():
             
             # Log the message creation
             log_message_cycle(
-                message_uuid, 
-                g.organization['uuid'], 
-                "message_created", 
-                message_type, 
-                {"stream": "Pasted Messages"}, 
-                "success"
+                message_uuid=message_uuid,
+                event_type="message_created",
+                details={
+                    "endpoint": "Pasted Messages",
+                    "message_type": message_type,
+                    "organization_uuid": g.organization['uuid']
+                },
+                status="success"
             )
             
             result = mongo.db.messages.insert_one(message)
@@ -167,12 +178,14 @@ def create_message():
             
             # Log the message storage
             log_message_cycle(
-                message_uuid, 
-                g.organization['uuid'], 
-                "message_stored", 
-                message_type, 
-                {"mongodb_id": inserted_id}, 
-                "success"
+                message_uuid=message_uuid,
+                event_type="message_stored",
+                details={
+                    "mongodb_id": inserted_id,
+                    "message_type": message_type,
+                    "organization_uuid": g.organization['uuid']
+                },
+                status="success"
             )
             
             # Queue the message for parsing
@@ -181,44 +194,60 @@ def create_message():
                 
                 # Log the queuing for parsing
                 log_message_cycle(
-                    message_uuid, 
-                    g.organization['uuid'], 
-                    "queued_for_parsing", 
-                    message_type, 
-                    {"task_id": parse_task.id}, 
-                    "success"
+                    message_uuid=message_uuid,
+                    event_type="queued_for_parsing",
+                    details={
+                        "task_id": parse_task.id,
+                        "message_type": message_type,
+                        "organization_uuid": g.organization['uuid']
+                    },
+                    status="success"
                 )
             except Exception as e:
                 # Log the queuing failure
                 log_message_cycle(
-                    message_uuid, 
-                    g.organization['uuid'], 
-                    "queue_for_parsing_failed", 
-                    message_type, 
-                    {"error": str(e)}, 
-                    "error",
-                    error_message=str(e)
+                    message_uuid=message_uuid,
+                    event_type="queue_for_parsing_failed",
+                    details={
+                        "error": str(e),
+                        "message_type": message_type,
+                        "organization_uuid": g.organization['uuid']
+                    },
+                    status="error"
                 )
                 raise
             
-            return jsonify({'status': 'success', 'message': 'Message saved and queued for processing.', 'message_id': inserted_id}), 200
+            return jsonify({
+                'status': 'success', 
+                'message': 'Message saved and queued for processing.',
+                'message_id': inserted_id
+            }), 200
+
         except Exception as e:
             current_app.logger.error(f"Error creating message: {str(e)}", exc_info=True)
             
             # Log the overall failure
             log_message_cycle(
-                message_uuid, 
-                g.organization['uuid'], 
-                "message_creation_failed", 
-                message_type, 
-                {"error": str(e)}, 
-                "error",
-                error_message=str(e)
+                message_uuid=message_uuid,
+                event_type="message_creation_failed",
+                details={
+                    "error": str(e),
+                    "message_type": message_type,
+                    "organization_uuid": g.organization['uuid']
+                },
+                status="error"
             )
             
-            return jsonify({'status': 'error', 'message': 'An error occurred while creating the message.'}), 500
+            return jsonify({
+                'status': 'error', 
+                'message': 'An error occurred while creating the message.'
+            }), 500
     else:
-        return jsonify({'status': 'error', 'message': 'Invalid form submission', 'errors': form.errors}), 400
+        return jsonify({
+            'status': 'error', 
+            'message': 'Invalid form submission', 
+            'errors': form.errors
+        }), 400
 
 @bp.route('/new', methods=['GET'])
 @login_required
@@ -254,9 +283,9 @@ def message_detail(message_id):
                 }
             )
 
-        # Get stream info
-        stream = mongo.db.streams.find_one({"uuid": message['stream_uuid']})
-        message['stream_name'] = stream['name'] if stream else 'Unknown Stream'
+        # Get endpoint info instead of stream info
+        endpoint = mongo.db.endpoints.find_one({"uuid": message.get('endpoint_uuid')})
+        message['endpoint_name'] = endpoint['name'] if endpoint else 'Unknown Endpoint'
         message['uuid'] = message.get('uuid', str(message['_id']))
 
         # Get all lifecycle logs with comprehensive query

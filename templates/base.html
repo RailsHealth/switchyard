@@ -9,6 +9,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lato:wght@400;700&display=swap">
 </head>
 <body>
+    <!-- Top Navigation -->
     <div class="top-nav">
         <div class="logo">
             <img src="{{ url_for('static', filename='images/logo.svg') }}" alt="Rails Health Logo">
@@ -16,25 +17,25 @@
         </div>
 
         <div class="organization-switcher">
-        <div id="org-dropdown-toggle" class="current-org">
-            {% if g.organization %}
-                {{ g.organization.name }}
-            {% else %}
-                Select Organization
-            {% endif %}
-            <span class="dropdown-arrow">▼</span>
-        </div>
+            <div id="org-dropdown-toggle" class="current-org">
+                {% if g.organization %}
+                    {{ g.organization.name }}
+                {% else %}
+                    Select Organization
+                {% endif %}
+                <span class="dropdown-arrow">▼</span>
+            </div>
 
-        <div id="org-dropdown" class="org-dropdown">
-            {% for org in get_user_organizations() %}
-                <a href="{{ url_for('organizations.switch_organization', uuid=org['uuid']) }}" 
-                   class="org-option {% if g.organization and org['uuid'] == g.organization['uuid'] %}active{% endif %}">
-                    {{ org['name'] }}
-                </a>
-            {% endfor %}
-            <a href="{{ url_for('organizations.create_new_organization') }}" class="add-org-btn">+ ADD NEW ORG</a>
+            <div id="org-dropdown" class="org-dropdown">
+                {% for org in get_user_organizations() %}
+                    <a href="{{ url_for('organizations.switch_organization', uuid=org['uuid']) }}" 
+                       class="org-option {% if g.organization and org['uuid'] == g.organization['uuid'] %}active{% endif %}">
+                        {{ org['name'] }}
+                    </a>
+                {% endfor %}
+                <a href="{{ url_for('organizations.create_new_organization') }}" class="add-org-btn">+ ADD NEW ORG</a>
+            </div>
         </div>
-    </div>
 
         <div class="user-menu">
             <img src="{{ url_for('static', filename='images/user-icon.svg') }}" alt="User Icon" class="user-icon">
@@ -49,44 +50,82 @@
     </div>
 
     <div class="layout">
+        <!-- Updated Sidebar Navigation -->
         <nav class="sidebar">
-            <section>
-                <h3>VIEW</h3>
-                <ul>
-                    <li><a href="{{ url_for('messages.view_messages') }}">Messages</a></li>
-                </ul>
-            </section>
-            <section>
-                <h3>CONFIGS</h3>
-                <ul>
-                    <li><a href="{{ url_for('streams.view_streams') }}">Input Streams</a></li>
-                    <li><a href="{{ url_for('streams.create_stream') }}">
-                        <img src="{{ url_for('static', filename='images/create_stream.svg') }}" alt="Create Stream">
-                        Create Stream
-                    </a></li>
-                    <li><a href="{{ url_for('streams.view_streams') }}">
-                        <img src="{{ url_for('static', filename='images/view_stream.svg') }}" alt="View Streams">
-                        View Streams
-                    </a></li>
-                </ul>
-            </section>
-            <section>
-                <h3>MONITOR</h3>
-                <ul>
-                    <li><a href="{{ url_for('logs.view_logs') }}">Logs</a></li>
-                </ul>
-            </section>
-            <section class="accounts-section">
-                <h3>ACCOUNTS</h3>
-                <ul>
-                    <li><a href="{{ url_for('accounts.manage') }}">Manage</a></li>
-                </ul>
-            </section>
+            <ul class="nav-list">
+                <!-- Home Group -->
+                <div class="nav-group group-home">
+                    <li class="nav-item">
+                        <a href="{{ url_for('main.view_home') }}" class="nav-link">
+                            <img src="{{ url_for('static', filename='images/home_page.png') }}" alt="Home" class="nav-icon">
+                            Home
+                        </a>
+                    </li>
+                </div>
+        
+                <!-- Data Group -->
+                <div class="nav-group group-data">
+                    <li class="nav-item">
+                        <a href="{{ url_for('messages.view_messages') }}" class="nav-link">
+                            <img src="{{ url_for('static', filename='images/messages_new.png') }}" alt="Messages" class="nav-icon">
+                            Messages
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="{{ url_for('templates.view_templates') }}" class="nav-link">
+                            <img src="{{ url_for('static', filename='images/templates.png') }}" alt="Templates" class="nav-icon">
+                            Templates
+                        </a>
+                    </li>
+                </div>
+        
+                <!-- Integrations Group -->
+                <div class="nav-group group-integrations">
+                    <li class="nav-item">
+                        <a href="{{ url_for('endpoints.view_endpoints') }}" class="nav-link">
+                            <img src="{{ url_for('static', filename='images/endpoint.png') }}" alt="Endpoints" class="nav-icon">
+                            Endpoints
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="{{ url_for('streams.view_streams') }}" class="nav-link">
+                            <img src="{{ url_for('static', filename='images/streams_new.png') }}" alt="Streams" class="nav-icon">
+                            Streams
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a href="{{ url_for('orgs.view_orgs') }}" class="nav-link">
+                            <img src="{{ url_for('static', filename='images/organisations_new.png') }}" alt="Organizations" class="nav-icon">
+                            Organizations
+                        </a>
+                    </li>
+                </div>
+        
+                <!-- Logs Group -->
+                <div class="nav-group group-logs">
+                    <li class="nav-item">
+                        <a href="{{ url_for('logs.view_logs') }}" class="nav-link">
+                            <img src="{{ url_for('static', filename='images/logs_new.png') }}" alt="Logs" class="nav-icon">
+                            Logs
+                        </a>
+                    </li>
+                </div>
+        
+                <!-- Settings Group (at bottom) -->
+                <div class="nav-group group-settings">
+                    <li class="nav-item">
+                        <a href="{{ url_for('settings.view_settings') }}" class="nav-link">
+                            <img src="{{ url_for('static', filename='images/Settings_new.png') }}" alt="Settings" class="nav-icon">
+                            Settings
+                        </a>
+                    </li>
+                </div>
+            </ul>
         </nav>
 
+        <!-- Main Content Area -->
         <main class="main-content" role="main">
             <div class="content">
-                <h1>{% block page_title %}{% endblock %}</h1>
                 {% block content %}{% endblock %}
             </div>
             <footer>

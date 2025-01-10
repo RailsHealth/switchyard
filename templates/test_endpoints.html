@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Select Test Endpoint - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="content-container">
+        <h1>New Endpoint</h1>
+        <p class="subtitle">Create a new endpoint to send or receive data, or select from pre-configured endpoints</p>
+
+        <div class="breadcrumb">
+            <a href="{{ url_for('endpoints.view_endpoints') }}">Endpoints</a> / 
+            <a href="{{ url_for('endpoints.create_endpoint') }}">New Endpoint</a> / 
+            Test Endpoints
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="test-endpoints-selection">
+                <form method="POST" action="{{ url_for('endpoints.create_test_endpoint') }}" id="test-endpoint-form">
+                    {{ form.csrf_token }}
+                    <input type="hidden" name="test_type" id="selected-test-type">
+                    
+                    <div class="test-endpoints-list">
+                        <!-- HL7v2 Test Server -->
+                        <div class="test-endpoint-option {% if has_hl7v2_test %}disabled{% endif %}" 
+                             data-test-type="hl7v2" 
+                             {% if not has_hl7v2_test %}tabindex="0"{% endif %}>
+                            <div class="test-endpoint-content">
+                                <h3>Connect to Test HL7v2 Server</h3>
+                                <p>Simulates an HL7v2 endpoint receiving a random HL7v2 message once every 2 seconds. Data generated using simhospital.</p>
+                                <div class="endpoint-info">
+                                    <span class="endpoint-mode">Endpoint Mode: Source</span>
+                                </div>
+                                {% if has_hl7v2_test %}
+                                    <div class="endpoint-status">
+                                        <span class="status-badge">Already configured</span>
+                                    </div>
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        <!-- Firely FHIR Server -->
+                        <div class="test-endpoint-option" data-test-type="firely" tabindex="0">
+                            <div class="test-endpoint-content">
+                                <h3>Connect to Firely FHIR Server</h3>
+                                <p>Connect to the public FHIR server maintained by Firely. Once switched ON, it starts receiving data from the server.</p>
+                                <div class="endpoint-info">
+                                    <span class="endpoint-mode">Endpoint Mode: Source</span>
+                                    <span class="server-url">{{ config.FHIR_SERVERS['firely'].url }}</span>
+                                    <span class="fhir-version">FHIR Version: {{ config.FHIR_SERVERS['firely'].version }}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- HAPI FHIR Server -->
+                        <div class="test-endpoint-option" data-test-type="hapi" tabindex="0">
+                            <div class="test-endpoint-content">
+                                <h3>Connect to HAPI FHIR Server</h3>
+                                <p>Connect to the public FHIR server maintained by HAPI. Once switched ON, it starts receiving data from the server.</p>
+                                <div class="endpoint-info">
+                                    <span class="endpoint-mode">Endpoint Mode: Source</span>
+                                    <span class="server-url">{{ config.FHIR_SERVERS['hapi'].url }}</span>
+                                    <span class="fhir-version">FHIR Version: {{ config.FHIR_SERVERS['hapi'].version }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <a href="{{ url_for('endpoints.create_endpoint') }}" class="btn btn-secondary">Back</a>
+                        <button type="submit" class="btn btn-primary" id="save-btn" disabled>Save Endpoint</button>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="error-message">
+                You do not have permission to create test endpoints. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('test-endpoint-form');
+    const saveBtn = document.getElementById('save-btn');
+    const selectedTestTypeInput = document.getElementById('selected-test-type');
+    const testEndpointOptions = document.querySelectorAll('.test-endpoint-option:not(.disabled)');
+
+    // Handle endpoint selection
+    testEndpointOptions.forEach(option => {
+        option.addEventListener('click', function() {
+            // Remove selected class from all options
+            testEndpointOptions.forEach(opt => opt.classList.remove('selected'));
+            
+            // Add selected class to clicked option
+            this.classList.add('selected');
+            
+            // Update hidden input and enable save button
+            selectedTestTypeInput.value = this.dataset.testType;
+            saveBtn.disabled = false;
+        });
+
+        // Add keyboard support
+        option.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                this.click();
+            }
+        });
+    });
+
+    // Handle form submission
+    form.addEventListener('submit', function(e) {
+        if (!selectedTestTypeInput.value) {
+            e.preventDefault();
+            alert('Please select a test endpoint');
+            return;
+        }
+
+        // Disable button and show loading state
+        saveBtn.disabled = true;
+        saveBtn.textContent = 'Creating Endpoint...';
+    });
+});
+</script>
+{% endblock %}

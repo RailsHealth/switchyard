@@ -56,11 +56,11 @@
             <div class="filters-and-pagination">
                 {{ form.csrf_token }}
                 <div class="filter-by">
-                    <select id="streamFilter" onchange="updateFilters()" class="form-select">
-                        <option value="">All Streams</option>
-                        {% for stream in streams %}
-                            <option value="{{ stream.uuid }}" {% if selected_stream_uuid == stream.uuid %}selected{% endif %}>
-                                {{ stream.name }}
+                    <select id="endpointFilter" onchange="updateFilters()" class="form-select">
+                        <option value="">All Endpoints</option>
+                        {% for endpoint in endpoints %}
+                            <option value="{{ endpoint.uuid }}" {% if selected_endpoint_uuid == endpoint.uuid %}selected{% endif %}>
+                                {{ endpoint.name }}
                             </option>
                         {% endfor %}
                     </select>
@@ -139,16 +139,16 @@ function hideLoading() {
 
 function updateFilters() {
     showLoading();
-    const streamFilter = document.getElementById('streamFilter');
+    const endpointFilter = document.getElementById('endpointFilter');
     const typeFilter = document.getElementById('typeFilter');
     
     const url = new URL(window.location.href);
     const params = url.searchParams;
     
-    if (streamFilter.value) {
-        params.set('stream_uuid', streamFilter.value);
+    if (endpointFilter.value) {
+        params.set('endpoint_uuid', endpointFilter.value);
     } else {
-        params.delete('stream_uuid');
+        params.delete('endpoint_uuid');
     }
     
     if (typeFilter.value) {

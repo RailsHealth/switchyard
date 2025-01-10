@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Create New Endpoint - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="content-container">
+        <h1>New Endpoint</h1>
+        <p class="subtitle">Create a new endpoint to send or receive data, or select from pre-configured endpoints</p>
+
+        <div class="breadcrumb">
+            <a href="{{ url_for('endpoints.view_endpoints') }}">Endpoints</a> / New Endpoint
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="endpoint-mode-selection">
+                <form method="POST" action="{{ url_for('endpoints.create_endpoint') }}" id="mode-selection-form">
+                    {{ form.csrf_token }}
+                    <input type="hidden" name="mode" id="selected-mode">
+                    
+                    <div class="mode-grid">
+                        <div class="mode-option" data-mode="destination">
+                            <div class="mode-content">
+                                <h3>Create Destination Endpoint</h3>
+                                <p>Send out data through this endpoint. Currently supports AWS S3-SSE, Google Cloud Storage-SSE.</p>
+                            </div>
+                        </div>
+
+                        <div class="mode-option" data-mode="source">
+                            <div class="mode-content">
+                                <h3>Create Source Endpoint</h3>
+                                <p>Receive data to the platform through this endpoint. Currently supports MLLP for HL7v2 and SFTP for PDF files.</p>
+                            </div>
+                        </div>
+
+                        <div class="mode-option" data-mode="test">
+                            <div class="mode-content">
+                                <h3>Try with Test Endpoints</h3>
+                                <p>Pre-configured endpoints to test the platform. Currently available HL7v2 MLLP endpoint,
+                                   FHIR source test servers from HAPI and Firely</p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="form-actions">
+                        <a href="{{ url_for('endpoints.view_endpoints') }}" class="btn btn-secondary">Cancel</a>
+                        <button type="submit" class="btn btn-primary" disabled id="next-btn">Next</button>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="error-message">
+                You do not have permission to create a new endpoint. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('mode-selection-form');
+    const nextBtn = document.getElementById('next-btn');
+    const selectedModeInput = document.getElementById('selected-mode');
+    const modeOptions = document.querySelectorAll('.mode-option');
+
+    // Handle mode selection
+    modeOptions.forEach(option => {
+        option.addEventListener('click', function() {
+            // Remove selected class from all options
+            modeOptions.forEach(opt => opt.classList.remove('selected'));
+            
+            // Add selected class to clicked option
+            this.classList.add('selected');
+            
+            // Update hidden input and enable button
+            selectedModeInput.value = this.dataset.mode;
+            nextBtn.disabled = false;
+        });
+
+        // Add keyboard support
+        option.setAttribute('tabindex', '0');
+        option.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                this.click();
+            }
+        });
+    });
+
+    // Handle form submission
+    form.addEventListener('submit', function(e) {
+        if (!selectedModeInput.value) {
+            e.preventDefault();
+            alert('Please select an endpoint mode');
+        }
+    });
+});
+</script>
+{% endblock %}

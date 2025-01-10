@@ -1,3 +1,3 @@
-from . import main, streams, messages, logs
+from . import main, messages, logs
 
-__all__ = ['main', 'streams', 'messages', 'logs']
+__all__ = ['main', 'messages', 'logs']

@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+
+{% block title %}View Streams - Rails Health{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="content-container">
+        {# Header Section #}
+        <div class="header-section">
+            <div>
+                <h1>Streams</h1>
+                <p class="subtitle">View, manage and create streams</p>
+            </div>
+
+            {# New Stream Button - Conditionally Disabled #}
+            <div class="new-stream-container">
+                {% if source_count and destination_count %}
+                    <a href="{{ url_for('streams.new_stream') }}" class="btn btn-new-stream">+ New Stream</a>
+                {% else %}
+                    <button class="btn btn-new-stream disabled" disabled>+ New Stream</button>
+                {% endif %}
+            </div>
+        </div>
+
+        {# Prerequisites and Intro Section #}
+        {% if not streams or streams|length == 0 %}
+            {% if not source_count and not destination_count %}
+                <div class="create-link">
+                    <a href="{{ url_for('endpoints.create_endpoint') }}">Create endpoints to begin</a>.
+                </div>
+                <div class="endpoint-status">
+                    You need at least 1 source and destination endpoint.
+                </div>
+            {% elif not destination_count %}
+                <div class="create-link">
+                    <a href="{{ url_for('endpoints.create_endpoint', mode='destination') }}">Create a destination endpoint to begin</a>.
+                </div>
+                <div class="endpoint-status">
+                    You need at least 1 destination endpoint.
+                </div>
+            {% elif not source_count %}
+                <div class="create-link">
+                    <a href="{{ url_for('endpoints.create_endpoint', mode='source') }}">Create a source endpoint to begin</a>.
+                </div>
+                <div class="endpoint-status">
+                    You need at least 1 source endpoint.
+                </div>
+            {% else %}
+                <div class="create-link">
+                    <a href="{{ url_for('streams.new_stream') }}">Create your first stream</a>.
+                </div>
+                <div class="endpoint-status">
+                    You do not have any streams yet.
+                </div>
+            {% endif %}
+
+            {# Show intro section only when no streams exist #}
+            <div class="intro-section">
+                <h2>What are streams?</h2>
+                <p>Streams are data pipes that send data from source endpoint(s) to destination endpoint(s).</p>
+                
+                <div class="stream-diagram">
+                    <img src="{{ url_for('static', filename='images/stream_intro.svg') }}" alt="Stream diagram showing data flow">
+                </div>
+
+                <div class="support-info">
+                    <h3>Right now, we support:</h3>
+                    <ul>
+                        <li>data from 1 source to 1 destination,</li>
+                        <li>without modifying the data. No HL7v2 to FHIR etc</li>
+                        <li>we encapsulate the data from PDF, HL7v2 etc into <em>json</em> packets that can be sent via <em>https</em>.</li>
+                    </ul>
+                </div>
+            </div>
+        {% endif %}
+
+        {# Streams List Section - Only show if we have streams #}
+        {% if streams %}
+            <div class="filter-section">
+                <span class="filter-label">Filter by</span>
+                <form method="GET" class="filter-form">
+                    {{ form.hidden_tag() }}
+                    {{ form.endpoint_type(class="form-select") }}
+                    {{ form.message_type(class="form-select") }}
+                </form>
+            </div>
+
+            <div class="stream-listing">
+                {% for stream in streams %}
+                    <div class="stream-card{% if stream.deleted %} deleted{% endif %}" 
+                         data-stream-uuid="{{ stream.uuid }}"
+                         {% if not stream.deleted %}onclick="window.location.href='{{ url_for('streams.stream_detail', uuid=stream.uuid) }}'"{% endif %}>
+                        <div class="stream-content">
+                            <div class="stream-header">
+                                <h3>{{ stream.name }}</h3>
+                            </div>
+                            
+                            <div class="stream-info">
+                                <div class="stream-endpoints">
+                                    <span class="endpoint-source">Source: {{ stream.source_endpoint.name }}</span>
+                                    <span class="endpoint-arrow">→</span>
+                                    <span class="endpoint-destination">Destination: {{ stream.destination_endpoint.name }}</span>
+                                </div>
+                                <div class="message-type">Message type: {{ stream.message_type }}</div>
+                            </div>
+
+                            <div class="stream-status {% if stream.status == 'ACTIVE' %}active{% endif %}">
+                                {% if stream.deleted %}
+                                    Deleted on {{ stream.deleted_at|datetime }}
+                                {% elif stream.status == 'ACTIVE' %}
+                                    Active since {{ stream.last_active|datetime }}
+                                {% else %}
+                                    Last active: {{ stream.last_active|datetime if stream.last_active else 'Never' }}
+                                {% endif %}
+                            </div>
+                        </div>
+
+                        {% if g.user_role == 'admin' and not stream.deleted %}
+                            <div class="stream-actions" onclick="event.stopPropagation()">
+                                {% if stream.status != "ACTIVE" %}
+                                    <button class="btn btn-secondary start-stream" 
+                                            data-stream-id="{{ stream.uuid }}"
+                                            {% if stream.status == "STARTING" %}disabled{% endif %}>
+                                        {% if stream.status == "STARTING" %}Starting...{% else %}Start{% endif %}
+                                    </button>
+                                {% else %}
+                                    <button class="btn btn-outline stop-stream" 
+                                            data-stream-id="{{ stream.uuid }}"
+                                            {% if stream.status == "STOPPING" %}disabled{% endif %}>
+                                        {% if stream.status == "STOPPING" %}Stopping...{% else %}Stop{% endif %}
+                                    </button>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+
+            {% if streams|length > 10 %}
+                {% include 'partials/pagination.html' %}
+            {% endif %}
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        // Handle filter form changes
+        const filterForm = document.querySelector('.filter-form');
+        if (filterForm) {
+            const filterInputs = filterForm.querySelectorAll('select');
+            filterInputs.forEach(input => {
+                input.addEventListener('change', () => filterForm.submit());
+            });
+        }
+
+        // Get CSRF token from the form
+        const csrfToken = document.querySelector('input[name="csrf_token"]').value;
+
+        // Stream action handler
+        function handleStreamAction(action, streamId, button) {
+            if (button.disabled) return;
+
+            button.disabled = true;
+            const originalText = button.textContent;
+            button.textContent = action === 'start' ? 'Starting...' : 'Stopping...';
+
+            fetch(`/streams/${streamId}/${action}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-CSRF-Token': csrfToken
+                }
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.status === 'success') {
+                    location.reload();
+                } else {
+                    throw new Error(data.message || 'Operation failed');
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert(`Operation failed: ${error.message}`);
+                button.disabled = false;
+                button.textContent = originalText;
+            });
+        }
+
+        // Attach event handlers to stream control buttons
+        document.querySelectorAll('.start-stream').forEach(button => {
+            button.addEventListener('click', e => {
+                e.stopPropagation();
+                handleStreamAction('start', button.dataset.streamId, button);
+            });
+        });
+
+        document.querySelectorAll('.stop-stream').forEach(button => {
+            button.addEventListener('click', e => {
+                e.stopPropagation();
+                handleStreamAction('stop', button.dataset.streamId, button);
+            });
+        });
+    });
+</script>
+{% endblock %}

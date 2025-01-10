@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+
+{% block title %}New Stream - Rails Health{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="wizard-container">
+        {# Header Section #}
+        <div class="wizard-header">
+            <h1>New Stream</h1>
+            <p>Create a stream to exchange data between endpoints.</p>
+        </div>
+
+        {# Path Indicator #}
+        <div class="wizard-path">
+            Streams/ New Stream/ 
+            {% if step == 'destination' %}
+                Select Destination
+            {% elif step == 'source' %}
+                Select Source
+            {% elif step == 'configure' %}
+                Final Details
+            {% endif %}
+        </div>
+
+        {# Flash Messages #}
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    <div class="alert alert-{{ category }}">{{ message }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+
+        {# Hidden Step Input - Used by JavaScript #}
+        <input type="hidden" id="current-step" value="{{ step }}">
+
+        {# Destination Selection Step #}
+        {% if step == 'destination' %}
+        <div class="wizard-step active" id="select-destination">
+            <h2>Select a Destination Endpoint</h2>
+            <p>Data will be sent to this endpoint in a supported format.</p>
+
+            {% if endpoints|length == 0 %}
+                <div class="empty-state">
+                    <p>No destination endpoints available. Please create one first.</p>
+                    <a href="{{ url_for('endpoints.create_endpoint', mode='destination') }}" 
+                       class="btn btn-primary">Create Destination Endpoint</a>
+                </div>
+            {% else %}
+                <div class="filter-section">
+                    <form class="filter-form" method="GET">
+                        {{ form.hidden_tag() }}
+                        {{ form.endpoint_type(class="form-select") }}
+                        {{ form.message_type(class="form-select") }}
+                    </form>
+                </div>
+
+                <div class="endpoints-list">
+                    {% for endpoint in endpoints %}
+                        <div class="endpoint-card {% if endpoint.uuid == selected_destination_uuid %}selected{% endif %}"
+                             data-endpoint-id="{{ endpoint.uuid }}">
+                            <h3>{{ endpoint.name }}</h3>
+                            <div class="endpoint-info">
+                                <div>
+                                    <span class="endpoint-label">Mode:</span>
+                                    <span>{{ endpoint.mode|title }}</span>
+                                </div>
+                                <div>
+                                    <span class="endpoint-label">Msg Type:</span>
+                                    <span>{{ config.MESSAGE_TYPE_DISPLAY.get(endpoint.message_type, endpoint.message_type) }}</span>
+                                </div>
+                                <div>
+                                    <span class="endpoint-label">Type:</span>
+                                    <span>{{ endpoint.endpoint_type|upper }}</span>
+                                </div>
+                            </div>
+                            <div class="endpoint-status">
+                                {% if endpoint.status == 'ACTIVE' %}
+                                    <span class="status-active">Active from {{ endpoint.last_active|datetime }}</span>
+                                {% else %}
+                                    <span class="status-inactive">Last active: {{ endpoint.last_active|datetime if endpoint.last_active else 'Never' }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="wizard-actions">
+                    <a href="{{ url_for('streams.view_streams') }}" class="btn btn-secondary">Cancel</a>
+                    <button type="button" class="btn btn-primary" onclick="submitEndpointSelection()">Next</button>
+                </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {# Source Selection Step #}
+        {% if step == 'source' %}
+        <div class="wizard-step active" id="select-source">
+            {% if destination_endpoint %}
+                <div class="selected-endpoint">
+                    <div>
+                        <span>Destination Endpoint:</span>
+                        <strong>{{ destination_endpoint.name }}</strong>
+                        <span class="endpoint-type">({{ destination_endpoint.endpoint_type|upper }})</span>
+                    </div>
+                    <a href="{{ url_for('streams.select_destination') }}" class="edit-link">Edit</a>
+                </div>
+            {% endif %}
+
+            <h2>Select a Source Endpoint</h2>
+            <p>Data from this source will be sent to the destination endpoint</p>
+
+            {% if endpoints|length == 0 %}
+                <div class="empty-state">
+                    <p>No source endpoints available. Please create one first.</p>
+                    <a href="{{ url_for('endpoints.create_endpoint', mode='source') }}" 
+                       class="btn btn-primary">Create Source Endpoint</a>
+                </div>
+            {% else %}
+                <div class="filter-section">
+                    <form class="filter-form" method="GET">
+                        {{ form.hidden_tag() }}
+                        {{ form.endpoint_type(class="form-select") }}
+                        {{ form.message_type(class="form-select") }}
+                    </form>
+                </div>
+
+                <div class="endpoints-list">
+                    {% for endpoint in endpoints %}
+                        <div class="endpoint-card {% if endpoint.uuid == selected_source_uuid %}selected{% endif %}"
+                             data-endpoint-id="{{ endpoint.uuid }}">
+                            <h3>{{ endpoint.name }}</h3>
+                            <div class="endpoint-info">
+                                <div>
+                                    <span class="endpoint-label">Mode:</span>
+                                    <span>{{ endpoint.mode|title }}</span>
+                                </div>
+                                <div>
+                                    <span class="endpoint-label">Msg Type:</span>
+                                    <span>{{ config.MESSAGE_TYPE_DISPLAY.get(endpoint.message_type, endpoint.message_type) }}</span>
+                                </div>
+                                <div>
+                                    <span class="endpoint-label">Type:</span>
+                                    <span>{{ endpoint.endpoint_type|upper }}</span>
+                                </div>
+                            </div>
+                            <div class="endpoint-status">
+                                {% if endpoint.status == 'ACTIVE' %}
+                                    <span class="status-active">Active from {{ endpoint.last_active|datetime }}</span>
+                                {% else %}
+                                    <span class="status-inactive">Last active: {{ endpoint.last_active|datetime if endpoint.last_active else 'Never' }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+
+                <div class="wizard-actions">
+                    <a href="{{ url_for('streams.select_destination') }}" class="btn btn-secondary">Back</a>
+                    <button type="button" class="btn btn-primary" onclick="submitEndpointSelection()">Next</button>
+                </div>
+            {% endif %}
+        </div>
+        {% endif %}
+
+        {# Configuration Step #}
+        {% if step == 'configure' %}
+        <div class="wizard-step active" id="configure">
+            {% if destination_endpoint %}
+                <div class="selected-endpoint">
+                    <div>
+                        <span>Destination Endpoint:</span>
+                        <strong>{{ destination_endpoint.name }}</strong>
+                        <span class="endpoint-type">({{ destination_endpoint.endpoint_type|upper }})</span>
+                    </div>
+                    <a href="{{ url_for('streams.select_destination') }}" class="edit-link">Edit</a>
+                </div>
+            {% endif %}
+
+            {% if source_endpoint %}
+                <div class="selected-endpoint">
+                    <div>
+                        <span>Source Endpoint:</span>
+                        <strong>{{ source_endpoint.name }}</strong>
+                        <span class="endpoint-type">({{ source_endpoint.endpoint_type|upper }})</span>
+                    </div>
+                    <a href="{{ url_for('streams.select_source') }}" class="edit-link">Edit</a>
+                </div>
+            {% endif %}
+
+            <h2>Final Details</h2>
+            <p>Please enter and confirm the final details to create the stream.</p>
+
+            <form method="POST" class="final-config">
+                {{ form.hidden_tag() }}
+                
+                <div class="config-field">
+                    <label for="name">Stream Name</label>
+                    {{ form.name(class="config-input", placeholder="Type in a unique name for the stream") }}
+                    {% if form.name.errors %}
+                        <div class="error-message">{{ form.name.errors[0] }}</div>
+                    {% endif %}
+                    <small class="help-text">Name must be 3-64 characters long and can contain letters, numbers, spaces, hyphens, and underscores</small>
+                </div>
+
+                <div class="config-field">
+                    <label for="message_type">Message Format</label>
+                    {{ form.message_type(class="config-input", readonly=true) }}
+                    <div class="message-type-info">
+                        <small>
+                            Messages from {{ source_endpoint.message_type if source_endpoint else '' }} source will be 
+                            encapsulated in JSON format for {{ destination_endpoint.endpoint_type|upper if destination_endpoint else '' }}
+                        </small>
+                    </div>
+
+                    {% if sample_data %}
+                        <div class="sample-data-section">
+                            <a href="#" class="sample-data-toggle" onclick="toggleSampleData(event)">View Sample Message Format</a>
+                            <div class="sample-data-content" id="sample-data">
+                                <pre>{{ sample_data|tojson(indent=2) }}</pre>
+                            </div>
+                        </div>
+                    {% endif %}
+                </div>
+
+                <div class="wizard-actions">
+                    <a href="{{ url_for('streams.select_source') }}" class="btn btn-secondary">Back</a>
+                    <button type="submit" class="btn btn-primary">Create Stream</button>
+                </div>
+            </form>
+        </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle filter form changes
+    const filterForm = document.querySelector('.filter-form');
+    if (filterForm) {
+        const filterInputs = filterForm.querySelectorAll('select');
+        filterInputs.forEach(input => {
+            input.addEventListener('change', () => filterForm.submit());
+        });
+    }
+
+    // Handle endpoint selection
+    const endpointCards = document.querySelectorAll('.endpoint-card');
+    endpointCards.forEach(card => {
+        card.addEventListener('click', function() {
+            endpointCards.forEach(c => c.classList.remove('selected'));
+            this.classList.add('selected');
+        });
+    });
+
+    // Initialize readonly message type field if present
+    const messageTypeField = document.querySelector('select[name="message_type"]');
+    if (messageTypeField && messageTypeField.hasAttribute('readonly')) {
+        messageTypeField.addEventListener('mousedown', function(e) {
+            e.preventDefault();
+            return false;
+        });
+    }
+});
+
+function submitEndpointSelection() {
+    const selectedCard = document.querySelector('.endpoint-card.selected');
+    if (!selectedCard) {
+        alert('Please select an endpoint');
+        return;
+    }
+
+    const currentStep = document.getElementById('current-step').value;
+    const endpointId = selectedCard.dataset.endpointId;
+    
+    // Get the CSRF token from the filter form
+    const filterForm = document.querySelector('.filter-form');
+    const csrfToken = filterForm.querySelector('input[name="csrf_token"]').value;
+    
+    // Create and submit form
+    const form = document.createElement('form');
+    form.method = 'POST';
+    form.action = window.location.href;
+    
+    form.innerHTML = `
+        <input type="hidden" name="csrf_token" value="${csrfToken}">
+        <input type="hidden" name="${currentStep}_endpoint" value="${endpointId}">
+    `;
+    
+    document.body.appendChild(form);
+    form.submit();
+}
+
+function toggleSampleData(event) {
+    event.preventDefault();
+    const content = document.getElementById('sample-data');
+    content.classList.toggle('show');
+}
+</script>
+{% endblock %}

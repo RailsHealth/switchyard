@@ -1,0 +1,120 @@
+{% extends "base.html" %}
+{% block title %}Configure MLLP Endpoint - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="endpoint-config-container">
+        <h1>New Endpoint</h1>
+        <p class="endpoint-config-subtitle">Create a new endpoint to send or receive data, or select from pre-configured endpoints</p>
+
+        <div class="endpoint-config-breadcrumb">
+            <a href="{{ url_for('endpoints.view_endpoints') }}">Endpoints</a> / 
+            <a href="{{ url_for('endpoints.create_endpoint') }}">New Endpoint</a> /
+            <a href="{{ url_for('endpoints.select_endpoint_options', mode=mode) }}">{{ mode|title }} Endpoint</a> /
+            Configure MLLP
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="endpoint-config-form">
+                <h2>Configure MLLP Details</h2>
+
+                <form method="POST" action="{{ url_for('endpoints.configure_endpoint', mode=mode, message_type=message_type, endpoint_type='mllp') }}" id="mllp-config-form">
+                    {{ form.csrf_token }}
+                    
+                    <div class="endpoint-config-field">
+                        <label for="name">Endpoint Name</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.name(class="endpoint-input", placeholder="Enter endpoint name") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="host">Host</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.host(class="endpoint-input", placeholder="Enter host address") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="port">Port</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.port(class="endpoint-input", placeholder="Enter port number") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="timeout">Timeout (seconds)</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.timeout(class="endpoint-input", placeholder="Enter timeout in seconds") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-actions">
+                        <a href="{{ url_for('endpoints.select_endpoint_options', mode=mode) }}" class="endpoint-btn endpoint-btn-secondary">Back</a>
+                        <button type="submit" class="endpoint-btn endpoint-btn-primary">Save Endpoint</button>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="endpoint-config-error">
+                You do not have permission to configure endpoints. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('mllp-config-form');
+    const inputs = form.querySelectorAll('.endpoint-input');
+
+    // Add validation classes on blur
+    inputs.forEach(input => {
+        input.addEventListener('blur', function() {
+            if (this.value.trim() === '') {
+                this.classList.add('endpoint-input-error');
+            } else {
+                this.classList.remove('endpoint-input-error');
+            }
+        });
+    });
+
+    // Form validation
+    form.addEventListener('submit', function(e) {
+        let isValid = true;
+        const portInput = form.querySelector('#port');
+        const timeoutInput = form.querySelector('#timeout');
+
+        inputs.forEach(input => {
+            if (input.value.trim() === '') {
+                input.classList.add('endpoint-input-error');
+                isValid = false;
+            }
+        });
+
+        // Validate port number
+        if (portInput.value) {
+            const port = parseInt(portInput.value);
+            if (isNaN(port) || port < 1 || port > 65535) {
+                portInput.classList.add('endpoint-input-error');
+                isValid = false;
+            }
+        }
+
+        // Validate timeout
+        if (timeoutInput.value) {
+            const timeout = parseInt(timeoutInput.value);
+            if (isNaN(timeout) || timeout < 1) {
+                timeoutInput.classList.add('endpoint-input-error');
+                isValid = false;
+            }
+        }
+
+        if (!isValid) {
+            e.preventDefault();
+        }
+    });
+});
+</script>
+{% endblock %}

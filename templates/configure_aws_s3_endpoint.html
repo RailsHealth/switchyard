@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block title %}Configure AWS S3 Endpoint - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="endpoint-config-container">
+        <h1>New Endpoint</h1>
+        <p class="endpoint-config-subtitle">Create a new endpoint to send or receive data, or select from pre-configured endpoints</p>
+
+        <div class="endpoint-config-breadcrumb">
+            <a href="{{ url_for('endpoints.view_endpoints') }}">Endpoints</a> / 
+            <a href="{{ url_for('endpoints.create_endpoint') }}">New Endpoint</a> /
+            <a href="{{ url_for('endpoints.select_endpoint_options', mode=mode) }}">{{ mode|title }} Endpoint</a> /
+            Configure AWS S3
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="endpoint-config-form">
+                <h2>Configure AWS S3 Details</h2>
+                <p class="endpoint-config-path">Endpoints/{{ mode|title }} Endpoint/AWS S3 Configuration</p>
+
+                <form method="POST" action="{{ url_for('endpoints.configure_endpoint', mode=mode, message_type=message_type, endpoint_type='aws_s3') }}" id="aws-config-form">
+                    {{ form.csrf_token }}
+                    
+                    <div class="endpoint-config-field">
+                        <label for="name">Endpoint Name</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.name(class="endpoint-input", placeholder="Enter endpoint name") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="aws_bucket">Bucket Name</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.aws_bucket(class="endpoint-input", placeholder="my-healthcare-data-bucket") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="aws_region">Region</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.aws_region(class="endpoint-select") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="aws_access_key">Access Key ID</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.aws_access_key(class="endpoint-input", placeholder="Enter AWS access key ID") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="aws_secret_key">Secret Access Key</label>
+                        <div class="endpoint-input-wrapper secure-input">
+                            {{ form.aws_secret_key(class="endpoint-input", placeholder="Enter AWS secret access key") }}
+                            <button type="button" class="toggle-visibility" aria-label="Toggle visibility">
+                                <span class="visibility-icon"></span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field endpoint-toggle-field">
+                        {{ form.aws_encryption(class="endpoint-toggle") }}
+                        <label for="aws_encryption">Enable Server-Side Encryption</label>
+                        <span class="endpoint-toggle-hint">Uses AWS-managed keys (SSE-S3)</span>
+                    </div>
+
+                    <div class="endpoint-config-actions">
+                        <a href="{{ url_for('endpoints.select_endpoint_options', mode=mode) }}" class="endpoint-btn endpoint-btn-secondary">Back</a>
+                        <button type="submit" class="endpoint-btn endpoint-btn-primary">Save Endpoint</button>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="endpoint-config-error">
+                You do not have permission to configure endpoints. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('aws-config-form');
+    const inputs = form.querySelectorAll('.endpoint-input');
+    
+    // Toggle secret key visibility
+    const toggleButton = document.querySelector('.toggle-visibility');
+    const secretKeyInput = document.getElementById('aws_secret_key');
+    
+    if (toggleButton && secretKeyInput) {
+        toggleButton.addEventListener('click', function() {
+            const type = secretKeyInput.type === 'password' ? 'text' : 'password';
+            secretKeyInput.type = type;
+            this.classList.toggle('visible');
+        });
+    }
+
+    // Form validation
+    form.addEventListener('submit', function(e) {
+        let isValid = true;
+
+        inputs.forEach(input => {
+            if (input.required && input.value.trim() === '') {
+                input.classList.add('endpoint-input-error');
+                isValid = false;
+            }
+        });
+
+        // Validate bucket name format
+        const bucketName = document.getElementById('aws_bucket').value;
+        if (bucketName && !/^[a-z0-9][a-z0-9.-]*[a-z0-9]$/.test(bucketName)) {
+            document.getElementById('aws_bucket').classList.add('endpoint-input-error');
+            isValid = false;
+        }
+
+        if (!isValid) {
+            e.preventDefault();
+        }
+    });
+
+    // Remove error class on input
+    inputs.forEach(input => {
+        input.addEventListener('input', function() {
+            this.classList.remove('endpoint-input-error');
+        });
+    });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+{% block title %}View Endpoints - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="content-container">
+        <h1>Endpoints</h1>
+        <p class="subtitle">View, manage and create endpoints</p>
+
+        <div class="endpoints-header">
+            <span>Endpoints/View Endpoints</span>
+            {% if g.user_role == 'admin' %}
+                <a href="{{ url_for('endpoints.create_endpoint') }}" class="btn btn-primary">+ New Endpoint</a>
+            {% endif %}
+        </div>
+
+        <div class="filter-section">
+            <span class="filter-label">Filter by</span>
+            <form method="GET" class="filter-form">
+                {{ form.mode(class="form-select", placeholder="Filter by mode") }}
+                {{ form.message_type(class="form-select", placeholder="Filter by message type") }}
+                {{ form.status(class="form-select", placeholder="Filter by status") }}
+                {% if has_filters %}
+                    <a href="{{ url_for('endpoints.view_endpoints') }}" class="btn btn-light">Clear Filters</a>
+                {% endif %}
+            </form>
+        </div>
+
+        {% if endpoints %}
+            <div class="endpoints-list">
+                {% for endpoint in endpoints %}
+                    <div class="endpoint-card {% if endpoint.deleted %}deleted{% endif %}"
+                         onclick="window.location.href='{{ url_for('endpoints.endpoint_detail', uuid=endpoint.uuid) }}'">
+                        <div class="endpoint-content">
+                            <div class="endpoint-header">
+                                <h3>{{ endpoint.name }}</h3>
+                            </div>
+                            
+                            <div class="endpoint-info">
+                                <div class="info-item">
+                                    <span class="label">Mode:</span>
+                                    <span class="value">{{ endpoint.mode|title }}</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Message Type:</span>
+                                    <span class="value">{{ endpoint.message_type }}</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="label">Type:</span>
+                                    <span class="value">{{ endpoint.endpoint_type|upper }}</span>
+                                </div>
+                            </div>
+
+                            {% if endpoint.status == "ACTIVE" %}
+                                <div class="endpoint-active-info">
+                                    Active from: {{ endpoint.last_active|datetime if endpoint.last_active }}
+                                </div>
+                            {% elif endpoint.last_active %}
+                                <div class="endpoint-active-info">
+                                    Last active at: {{ endpoint.last_active|datetime }}
+                                </div>
+                            {% endif %}
+                        </div>
+
+                        {% if g.user_role == 'admin' and not endpoint.deleted %}
+                            <div class="endpoint-actions" onclick="event.stopPropagation()">
+                                {% if endpoint.status != "ACTIVE" %}
+                                    <button class="btn btn-secondary start-endpoint" 
+                                            data-endpoint-id="{{ endpoint.uuid }}"
+                                            {% if endpoint.status == "STARTING" %}disabled{% endif %}>
+                                        {% if endpoint.status == "STARTING" %}Starting...{% else %}Start{% endif %}
+                                    </button>
+                                {% else %}
+                                    <button class="btn btn-outline stop-endpoint" 
+                                            data-endpoint-id="{{ endpoint.uuid }}"
+                                            {% if endpoint.status == "STOPPING" %}disabled{% endif %}>
+                                        {% if endpoint.status == "STOPPING" %}Stopping...{% else %}Stop{% endif %}
+                                    </button>
+                                {% endif %}
+                            </div>
+                        {% endif %}
+                    </div>
+                {% endfor %}
+            </div>
+        {% elif has_filters %}
+            <div class="no-results-state">
+                <img src="{{ url_for('static', filename='images/broken.svg') }}" 
+                     alt="No matching endpoints"
+                     width="48"
+                     height="48">
+                <h3>No matching endpoints found</h3>
+                <p class="explanation">No endpoints match your current filter criteria.</p>
+                <p class="action-text">
+                    <a href="{{ url_for('endpoints.view_endpoints') }}" class="btn btn-link">Clear all filters</a>
+                </p>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <img src="{{ url_for('static', filename='images/broken.svg') }}" 
+                     alt="No endpoints configured"
+                     width="48"
+                     height="48">
+                <h3>No endpoints configured yet!</h3>
+                <p class="explanation">Endpoints are touchpoints that<br>connect to health data from your systems.</p>
+                <p class="action-text">Add an endpoint to  <br>start, secure and seamless data flow.</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Handle filter form changes - instant filtering
+    const filterForm = document.querySelector('.filter-form');
+    if (filterForm) {
+        const filterInputs = filterForm.querySelectorAll('select');
+        filterInputs.forEach(input => {
+            input.addEventListener('change', () => {
+                // Store current filter state
+                const currentFilters = new FormData(filterForm);
+                let hasValue = false;
+                for (let value of currentFilters.values()) {
+                    if (value) {
+                        hasValue = true;
+                        break;
+                    }
+                }
+                
+                // Submit form
+                filterForm.submit();
+            });
+        });
+    }
+
+    // Handle endpoint actions with proper state management
+    const STATES = {
+        IDLE: 'idle',
+        STARTING: 'starting',
+        STOPPING: 'stopping'
+    };
+
+    function updateButtonState(button, state, action) {
+        button.disabled = state !== STATES.IDLE;
+        if (state === STATES.STARTING) {
+            button.textContent = 'Starting...';
+        } else if (state === STATES.STOPPING) {
+            button.textContent = 'Stopping...';
+        } else {
+            button.textContent = action === 'start' ? 'Start' : 'Stop';
+        }
+    }
+
+    function handleEndpointAction(action, endpointId, button) {
+        const state = action === 'start' ? STATES.STARTING : STATES.STOPPING;
+        updateButtonState(button, state, action);
+
+        fetch(`/endpoints/${endpointId}/${action}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-CSRFToken': '{{ csrf_token() }}'
+            }
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP error! status: ${response.status}`);
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.status === 'success' || data.status === 'warning') {
+                // Preserve filter state when reloading
+                const currentUrl = new URL(window.location.href);
+                setTimeout(() => {
+                    location.href = currentUrl;
+                }, 500);
+            } else {
+                throw new Error(data.message || 'Operation failed');
+            }
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            alert('An error occurred while performing the action');
+            updateButtonState(button, STATES.IDLE, action);
+        });
+    }
+
+    // Attach handlers to start/stop buttons
+    document.querySelectorAll('.start-endpoint').forEach(button => {
+        button.addEventListener('click', e => {
+            e.stopPropagation();
+            handleEndpointAction('start', button.dataset.endpointId, button);
+        });
+    });
+
+    document.querySelectorAll('.stop-endpoint').forEach(button => {
+        button.addEventListener('click', e => {
+            e.stopPropagation();
+            handleEndpointAction('stop', button.dataset.endpointId, button);
+        });
+    });
+});
+</script>
+{% endblock %}

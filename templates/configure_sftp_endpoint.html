@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+{% block title %}Configure SFTP Endpoint - Rails Health Interface{% endblock %}
+{% block content %}
+<div class="main-content">
+    <div class="endpoint-config-container">
+        <h1>New Endpoint</h1>
+        <p class="endpoint-config-subtitle">Create a new endpoint to send or receive data, or select from pre-configured endpoints</p>
+
+        <div class="endpoint-config-breadcrumb">
+            <a href="{{ url_for('endpoints.view_endpoints') }}">Endpoints</a> / 
+            <a href="{{ url_for('endpoints.create_endpoint') }}">New Endpoint</a> /
+            <a href="{{ url_for('endpoints.select_endpoint_options', mode=mode) }}">{{ mode|title }} Endpoint</a> /
+            Configure SFTP
+        </div>
+
+        {% if g.user_role == 'admin' %}
+            <div class="endpoint-config-form">
+                <h2>Configure SFTP Details</h2>
+                <p class="endpoint-config-path">Endpoints/{{ mode|title }} Endpoint/SFTP Configuration</p>
+
+                <form method="POST" action="{{ url_for('endpoints.configure_endpoint', mode=mode, message_type=message_type, endpoint_type='sftp') }}" id="sftp-config-form">
+                    {{ form.csrf_token }}
+                    
+                    <div class="endpoint-config-field">
+                        <label for="name">Endpoint Name</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.name(class="endpoint-input", placeholder="Enter endpoint name") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="host">Host</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.host(class="endpoint-input", placeholder="Enter host address") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="port">Port</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.port(class="endpoint-input", placeholder="Enter port number") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="username">Username</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.username(class="endpoint-input", placeholder="Enter SFTP username") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="auth_method">Authentication Method</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.auth_method(class="endpoint-select") }}
+                        </div>
+                    </div>
+
+                    <div id="password_group" class="endpoint-config-field">
+                        <label for="password">Password</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.password(class="endpoint-input", placeholder="Enter SFTP password") }}
+                        </div>
+                    </div>
+
+                    <div id="private_key_group" class="endpoint-config-field" style="display:none;">
+                        <label for="private_key">Private Key</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.private_key(class="endpoint-input", placeholder="Enter SSH private key") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="remote_path">Remote Path</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.remote_path(class="endpoint-input", placeholder="Enter remote path (e.g., /data/files)") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="file_pattern">File Pattern</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.file_pattern(class="endpoint-input", placeholder="Enter file pattern (e.g., *.pdf)") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-field">
+                        <label for="fetch_interval">Fetch Interval (seconds)</label>
+                        <div class="endpoint-input-wrapper">
+                            {{ form.fetch_interval(class="endpoint-input", placeholder="Enter fetch interval in seconds") }}
+                        </div>
+                    </div>
+
+                    <div class="endpoint-config-actions">
+                        <a href="{{ url_for('endpoints.select_endpoint_options', mode=mode) }}" class="endpoint-btn endpoint-btn-secondary">Back</a>
+                        <button type="submit" class="endpoint-btn endpoint-btn-primary">Save Endpoint</button>
+                    </div>
+                </form>
+            </div>
+        {% else %}
+            <div class="endpoint-config-error">
+                You do not have permission to configure endpoints. Please contact an administrator.
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const form = document.getElementById('sftp-config-form');
+    const authMethod = document.getElementById('auth_method');
+    const passwordGroup = document.getElementById('password_group');
+    const privateKeyGroup = document.getElementById('private_key_group');
+    const inputs = form.querySelectorAll('.endpoint-input');
+
+    // Toggle authentication method fields
+    authMethod.addEventListener('change', function() {
+        if (this.value === 'password') {
+            passwordGroup.style.display = 'block';
+            privateKeyGroup.style.display = 'none';
+        } else {
+            passwordGroup.style.display = 'none';
+            privateKeyGroup.style.display = 'block';
+        }
+    });
+
+    // Initialize auth method display
+    authMethod.dispatchEvent(new Event('change'));
+
+    // Form validation
+    form.addEventListener('submit', function(e) {
+        let isValid = true;
+
+        inputs.forEach(input => {
+            if (input.required && input.value.trim() === '') {
+                input.classList.add('endpoint-input-error');
+                isValid = false;
+            }
+        });
+
+        // Validate port number
+        const port = document.getElementById('port').value;
+        if (port) {
+            const portNum = parseInt(port);
+            if (isNaN(portNum) || portNum < 1 || portNum > 65535) {
+                document.getElementById('port').classList.add('endpoint-input-error');
+                isValid = false;
+            }
+        }
+
+        // Validate fetch interval
+        const interval = document.getElementById('fetch_interval').value;
+        if (interval) {
+            const intervalNum = parseInt(interval);
+            if (isNaN(intervalNum) || intervalNum < 1) {
+                document.getElementById('fetch_interval').classList.add('endpoint-input-error');
+                isValid = false;
+            }
+        }
+
+        // Validate authentication
+        if (authMethod.value === 'password' && 
+            document.getElementById('password').value.trim() === '') {
+            document.getElementById('password').classList.add('endpoint-input-error');
+            isValid = false;
+        } else if (authMethod.value === 'key' && 
+                   document.getElementById('private_key').value.trim() === '') {
+            document.getElementById('private_key').classList.add('endpoint-input-error');
+            isValid = false;
+        }
+
+        if (!isValid) {
+            e.preventDefault();
+        }
+    });
+
+    // Remove error class on input
+    inputs.forEach(input => {
+        input.addEventListener('input', function() {
+            this.classList.remove('endpoint-input-error');
+        });
+    });
+});
+</script>
+{% endblock %}
