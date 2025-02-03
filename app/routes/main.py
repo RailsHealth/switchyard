@@ -1,9 +1,7 @@
-from flask import Blueprint, render_template, redirect, url_for, current_app, g, flash, request, session
+from flask import Blueprint, render_template, redirect, url_for, flash, g, jsonify, current_app
 from app.extensions import mongo
-from pymongo.errors import PyMongoError
-from app.auth import login_required, admin_required
-from app.models.organization import Organization
-from app.models.user import User
+from app.auth.decorators import login_required, admin_required
+from datetime import datetime
 import logging
 
 bp = Blueprint('main', __name__)
@@ -11,28 +9,25 @@ logger = logging.getLogger(__name__)
 
 @bp.route('/')
 def index():
+    """Root route handler"""
     try:
         if not g.user:
             return redirect(url_for('auth.login'))
             
         # Check if user has any organizations
-        user_orgs = User.get_organizations(g.user['uuid'])
-        if not user_orgs:
-            logger.info(f"User {g.user['email']} has no organizations, redirecting to create organization")
+        user_orgs = mongo.db.users.find_one(
+            {"uuid": g.user['uuid']},
+            {"organizations": 1}
+        )
+        
+        if not user_orgs or not user_orgs.get('organizations'):
+            logger.info(f"User {g.user['email']} has no organizations")
             return redirect(url_for('auth.create_organization'))
             
         # Check if current organization is set
         if not g.organization:
             logger.info(f"No current organization set for user {g.user['email']}")
-            if len(user_orgs) == 1:
-                # If user has only one organization, set it as current
-                org_id = user_orgs[0]['uuid']
-                session['current_org_id'] = org_id
-                logger.info(f"Automatically set organization {org_id} as current")
-                return redirect(url_for('main.view_home'))
-            else:
-                # If user has multiple organizations, let them choose
-                return redirect(url_for('organizations.list_organizations'))
+            return redirect(url_for('organizations.list_organizations'))
                 
         return redirect(url_for('main.view_home'))
         
@@ -44,57 +39,138 @@ def index():
 @bp.route('/home')
 @login_required
 def view_home():
-    """New home page route"""
+    """Dashboard home view"""
     try:
         if not g.organization:
             logger.info("No active organization, redirecting to organization selection")
             return redirect(url_for('organizations.list_organizations'))
 
-        return render_template(
-            'coming_soon.html',
-            page_title="Home",
-            page_description="dashboard",
-            dashboard_stats={
-                'message_count': mongo.db.messages.count_documents({"organization_uuid": g.organization['uuid']}),
-                'endpoint_count': mongo.db.endpoints.count_documents({
-                    "organization_uuid": g.organization['uuid'],
-                    "deleted": {"$ne": True}
-                })
-            }
-        )
+        return render_template('dashboard.html')
             
-    except PyMongoError as e:
-        logger.error(f"MongoDB error in home view: {str(e)}", exc_info=True)
-        flash('A database error occurred. Please try again.', 'error')
-        return render_template('500.html'), 500
     except Exception as e:
-        logger.error(f"Unexpected error in home view: {str(e)}", exc_info=True)
+        logger.error(f"Error in home view: {str(e)}", exc_info=True)
         flash('An unexpected error occurred. Please try again.', 'error')
         return render_template('500.html'), 500
 
-@bp.route('/dashboard')
+@bp.route('/api/dashboard/stats')
 @login_required
-def dashboard():
-    """Maintain old dashboard route for backward compatibility"""
-    return redirect(url_for('main.view_home'))
+def get_dashboard_stats():
+    """Get real-time dashboard statistics"""
+    try:
+        # Get UTC datetime for today's start
+        # Frontend will adjust this based on local timezone
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        org_uuid = g.organization['uuid']
+
+        # Basic counts
+        streams_count = mongo.db.streams_v2.count_documents({
+            "organization_uuid": org_uuid,
+            "deleted": {"$ne": True}
+        })
+
+        all_endpoints = mongo.db.endpoints.count_documents({
+            "organization_uuid": org_uuid,
+            "deleted": {"$ne": True}
+        })
+
+        source_endpoints = mongo.db.endpoints.count_documents({
+            "organization_uuid": org_uuid,
+            "mode": "source",
+            "deleted": {"$ne": True}
+        })
+
+        destination_endpoints = mongo.db.endpoints.count_documents({
+            "organization_uuid": org_uuid,
+            "mode": "destination",
+            "deleted": {"$ne": True}
+        })
+
+        # Get source endpoint UUIDs
+        source_endpoint_uuids = [
+            e["uuid"] for e in mongo.db.endpoints.find(
+                {
+                    "organization_uuid": org_uuid,
+                    "mode": "source",
+                    "deleted": {"$ne": True}
+                },
+                {"uuid": 1}
+            )
+        ]
+
+        # Get destination endpoint UUIDs
+        destination_endpoint_uuids = [
+            e["uuid"] for e in mongo.db.endpoints.find(
+                {
+                    "organization_uuid": org_uuid,
+                    "mode": "destination",
+                    "deleted": {"$ne": True}
+                },
+                {"uuid": 1}
+            )
+        ]
+
+        # Count messages
+        messages_received = mongo.db.messages.count_documents({
+            "organization_uuid": org_uuid,
+            "timestamp": {"$gte": today_start},
+            "endpoint_uuid": {"$in": source_endpoint_uuids}
+        }) if source_endpoint_uuids else 0
+
+        messages_sent = mongo.db.messages.count_documents({
+            "organization_uuid": org_uuid,
+            "timestamp": {"$gte": today_start},
+            "endpoint_uuid": {"$in": destination_endpoint_uuids}
+        }) if destination_endpoint_uuids else 0
+
+        return jsonify({
+            "streams_count": streams_count,
+            "endpoints_count": all_endpoints,
+            "source_endpoints_count": source_endpoints,
+            "destination_endpoints_count": destination_endpoints,
+            "messages_received_today": messages_received,
+            "messages_sent_today": messages_sent,
+            "server_time": today_start.isoformat()  # Include server time for reference
+        })
+
+    except Exception as e:
+        logger.error(f"Error fetching dashboard stats: {str(e)}", exc_info=True)
+        return jsonify({
+            "error": "Failed to fetch dashboard statistics",
+            "streams_count": 0,
+            "endpoints_count": 0,
+            "source_endpoints_count": 0,
+            "destination_endpoints_count": 0,
+            "messages_received_today": 0,
+            "messages_sent_today": 0
+        }), 500
 
 @bp.route('/switch_organization/<org_uuid>')
 @login_required
 def switch_organization(org_uuid):
+    """Handle organization switching"""
     try:
-        org = Organization.get_by_uuid(org_uuid)
+        org = mongo.db.organizations.find_one({"uuid": org_uuid})
         if not org:
             flash('Organization not found', 'error')
             return redirect(url_for('main.view_home'))
             
-        user_orgs = [o['uuid'] for o in User.get_organizations(g.user['uuid'])]
-        if org_uuid not in user_orgs:
+        # Verify user has access to this organization
+        user = mongo.db.users.find_one({
+            "uuid": g.user['uuid'],
+            "organizations.uuid": org_uuid
+        })
+        
+        if not user:
             flash('You do not have access to this organization', 'error')
             return redirect(url_for('main.view_home'))
 
-        User.set_current_organization(g.user['uuid'], org_uuid)
-        flash(f'Switched to organization: {org["name"]}', 'success')
+        # Update user's current organization
+        mongo.db.users.update_one(
+            {"uuid": g.user['uuid']},
+            {"$set": {"current_organization": org_uuid}}
+        )
         
+        flash(f'Switched to organization: {org["name"]}', 'success')
         return redirect(url_for('main.view_home'))
         
     except Exception as e:
@@ -104,34 +180,32 @@ def switch_organization(org_uuid):
 
 @bp.route('/health')
 def health_check():
-    """Health check endpoint to verify the application is running."""
+    """Health check endpoint"""
     try:
-        # Check MongoDB connection
+        # Verify MongoDB connection
         mongo.db.command('ping')
         
-        return {
+        # Check Redis if used
+        redis_status = 'connected'
+        try:
+            from app.extensions import redis_client
+            redis_client.ping()
+        except:
+            redis_status = 'unavailable'
+        
+        return jsonify({
             'status': 'healthy',
             'database': 'connected',
+            'redis': redis_status,
             'environment': current_app.config['ENV']
-        }
+        })
     except Exception as e:
         logger.error(f"Health check failed: {str(e)}")
-        return {
+        return jsonify({
             'status': 'unhealthy',
             'error': str(e),
             'environment': current_app.config['ENV']
-        }, 500
-
-# Context processor for common data
-@bp.app_context_processor
-def utility_processor():
-    """Add utility functions to template context"""
-    def get_user_organizations():
-        if g.user:
-            return User.get_organizations(g.user['uuid'])
-        return []
-        
-    return dict(get_user_organizations=get_user_organizations)
+        }), 500
 
 # Error handlers
 @bp.app_errorhandler(404)
@@ -143,3 +217,26 @@ def not_found_error(error):
 def internal_error(error):
     logger.error('500 error occurred: %s', str(error))
     return render_template('500.html'), 500
+
+# Context processor for common data
+@bp.app_context_processor
+def utility_processor():
+    """Utility functions available in templates"""
+    def get_user_organizations():
+        if g.user:
+            return mongo.db.organizations.find({
+                "uuid": {"$in": [org["uuid"] for org in g.user.get("organizations", [])]}
+            })
+        return []
+        
+    def get_organization_role(org_uuid):
+        if g.user:
+            org = next((org for org in g.user.get("organizations", []) 
+                       if org["uuid"] == org_uuid), None)
+            return org["role"] if org else None
+        return None
+        
+    return dict(
+        get_user_organizations=get_user_organizations,
+        get_organization_role=get_organization_role
+    )

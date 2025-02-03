@@ -3735,7 +3735,8 @@ select.form-control {
 
 .endpoint-status {
     color: #dc3545;
-    font-size: 14px;
+    font-size: 16px;
+    margin-bottom:24px;
 }
 
 /* Introduction Section */
@@ -4783,4 +4784,225 @@ select[readonly] {
     padding: 0.5rem;
     border: 1px solid #ced4da;
     border-radius: 0.25rem;
+}
+
+/* Dashboard Styles */
+.dashboard-container {
+    background-color: #ffffff;
+    width: 100%;
+    max-width: 800px;
+}
+
+.dashboard-header {
+    margin-bottom: 32px;
+}
+
+.dashboard-header h1 {
+    font-size: 24px;
+    font-weight: 600;
+    margin: 0;
+    color: #333;
+}
+
+.dashboard-header p {
+    font-size: 14px;
+    color: #666;
+    margin: 8px 0 0 0;
+}
+
+/* Stats Grid */
+.dashboard-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    margin-bottom: 32px;
+}
+
+.stat-card {
+    background: #FFFFFF;
+    border: 1px solid #E0E0E0;
+    border-radius: 8px;
+    padding: 24px;
+}
+
+.stat-content {
+    position: relative;
+}
+
+.stat-number {
+    font-size: 40px;
+    font-weight: 600;
+    margin: 0 0 8px 0;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.stat-label {
+    font-size: 14px;
+    color: #666;
+    margin: 0 0 12px 0;
+}
+
+.stat-link {
+    color: #3498db;
+    text-decoration: none;
+    font-size: 14px;
+}
+
+/* Quick Actions - Fixed Layout */
+.quick-actions {
+    background: #FFFFFF;
+    border: 1px solid #E0E0E0;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 32px;
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;  /* Changed from center to flex-start */
+    gap: 24px;
+}
+
+.quick-actions .text-content {
+    flex-grow: 1;
+}
+
+.action-text {
+    display: flex;
+    font-size: 16px;
+    margin: 0 0 8px 0;
+    color: #666;
+    flex: 1;
+    line-height: 1.4;
+}
+
+.action-subtext {
+    display: flex;
+    font-size: 16px;
+    color: #666;
+    margin: 0;
+    line-height: 1.4;
+}
+
+.action-buttons {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+    flex-shrink: 0;
+}
+
+.action-button {
+    padding: 8px 16px;
+    background: #FFFFFF;
+    border: 1px solid #000;
+    border-radius: 4px;
+    color: #333;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+    display: grid;
+}
+
+.action-button:hover {
+    background: #F8F9FA;
+    border-color: #333;
+}
+
+/* Detailed Stats */
+.detailed-stats {
+    background: #FFFFFF;
+    border: 1px solid #E0E0E0;
+    border-radius: 8px;
+    padding: 24px;
+    margin-bottom: 32px;
+}
+
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 24px;
+    padding-bottom: 24px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid #E0E0E0;
+}
+
+.stats-row:last-child {
+    padding-bottom: 0;
+    margin-bottom: 0;
+    border-bottom: none;
+}
+
+.stat-group .stat-number {
+    font-size: 32px;
+}
+
+/* View Messages Button */
+.view-messages {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 32px;
+}
+
+.view-messages-button {
+    padding: 8px 16px;
+    background: #FFFFFF;
+    border: 1px solid #000;
+    border-radius: 4px;
+    color: #333;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 500;
+    transition: all 0.2s ease;
+}
+
+.view-messages-button:hover {
+    background: #F8F9FA;
+    border-color: #333;
+}
+
+/* Loading Pulse Animation */
+.loading-pulse {
+    width: 24px;
+    height: 24px;
+    display: none;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0.4;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+/* Responsive Adjustments */
+@media (max-width: 768px) {
+    .dashboard-container {
+        padding: 20px;
+    }
+
+    .dashboard-stats-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .stats-row {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+
+    .action-buttons {
+        flex-direction: column;
+    }
+
+    .action-button {
+        width: 100%;
+        text-align: center;
+    }
 }

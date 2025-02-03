@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Home - Rails Health Interface{% endblock %}
+
+{% block content %}
+<div class="main-content">
+    <div class="dashboard-container">
+        <!-- Header -->
+        <div class="dashboard-header">
+            <h1>{{ g.organization.name }}</h1>
+            <p>Hello, {{ g.user.name }}. Here is your summary.</p>
+        </div>
+
+        <!-- Quick Stats -->
+        <div class="dashboard-stats-grid">
+            <!-- Streams Card -->
+            <div class="stat-card">
+                <div class="stat-content">
+                    <h2 class="stat-number" id="streams-count">
+                        <span class="value">0</span>
+                        <img src="{{ url_for('static', filename='images/Pulse.png') }}" class="loading-pulse" alt="Loading">
+                    </h2>
+                    <p class="stat-label">streams</p>
+                    <a href="{{ url_for('streams.view_streams') }}" class="stat-link">view all</a>
+                </div>
+            </div>
+
+            <!-- Endpoints Card -->
+            <div class="stat-card">
+                <div class="stat-content">
+                    <h2 class="stat-number" id="endpoints-count">
+                        <span class="value">0</span>
+                        <img src="{{ url_for('static', filename='images/Pulse.png') }}" class="loading-pulse" alt="Loading">
+                    </h2>
+                    <p class="stat-label">endpoints</p>
+                    <a href="{{ url_for('endpoints.view_endpoints') }}" class="stat-link">view all</a>
+                </div>
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="quick-actions">
+            <div class="text-content">
+                <p class="action-text">Add an Endpoint or, create a Stream.</p>
+                <p class="action-subtext">Streams are data-pipes that connect endpoints.</p>
+            </div>
+            <div class="action-buttons">
+                <a href="{{ url_for('endpoints.view_endpoints') }}" class="action-button">+ New Endpoint</a>
+                <a href="{{ url_for('streams.view_streams') }}" class="action-button">+ New Stream</a>
+            </div>
+        </div>
+
+        <!-- Detailed Stats -->
+        <div class="detailed-stats">
+            <div class="stats-row">
+                <div class="stat-group">
+                    <h3 class="stat-number" id="source-endpoints">
+                        <span class="value">0</span>
+                        <img src="{{ url_for('static', filename='images/Pulse.png') }}" class="loading-pulse" alt="Loading">
+                    </h3>
+                    <p class="stat-label">source endpoints</p>
+                </div>
+                <div class="stat-group">
+                    <h3 class="stat-number" id="messages-received">
+                        <span class="value">0</span>
+                        <img src="{{ url_for('static', filename='images/Pulse.png') }}" class="loading-pulse" alt="Loading">
+                    </h3>
+                    <p class="stat-label">messages received today</p>
+                </div>
+            </div>
+            <div class="stats-row">
+                <div class="stat-group">
+                    <h3 class="stat-number" id="destination-endpoints">
+                        <span class="value">0</span>
+                        <img src="{{ url_for('static', filename='images/Pulse.png') }}" class="loading-pulse" alt="Loading">
+                    </h3>
+                    <p class="stat-label">destination endpoints</p>
+                </div>
+                <div class="stat-group">
+                    <h3 class="stat-number" id="messages-sent">
+                        <span class="value">0</span>
+                        <img src="{{ url_for('static', filename='images/Pulse.png') }}" class="loading-pulse" alt="Loading">
+                    </h3>
+                    <p class="stat-label">messages sent today</p>
+                </div>
+            </div>
+        </div>
+
+        <!-- View Messages Button -->
+        <div class="view-messages">
+            <a href="{{ url_for('messages.view_messages') }}" class="view-messages-button">View Messages</a>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Get browser's timezone offset in minutes
+    const timezoneOffset = new Date().getTimezoneOffset();
+    
+    let prevValues = {
+        'streams-count': '0',
+        'endpoints-count': '0',
+        'source-endpoints': '0',
+        'destination-endpoints': '0',
+        'messages-received': '0',
+        'messages-sent': '0'
+    };
+
+    function adjustToLocalTime(utcData) {
+        // Deep copy the data
+        const localData = {...utcData};
+        
+        // Convert UTC date filters to local time if needed
+        // This affects how "today's" messages are counted
+        return localData;
+    }
+
+    function updateDashboard() {
+        fetch('{{ url_for("main.get_dashboard_stats") }}')
+            .then(response => response.json())
+            .then(data => {
+                // Convert UTC data to local time
+                const localData = adjustToLocalTime(data);
+                
+                // Map API response fields to DOM IDs
+                const mappings = {
+                    'streams_count': 'streams-count',
+                    'endpoints_count': 'endpoints-count',
+                    'source_endpoints_count': 'source-endpoints',
+                    'destination_endpoints_count': 'destination-endpoints',
+                    'messages_received_today': 'messages-received',
+                    'messages_sent_today': 'messages-sent'
+                };
+
+                // Update values
+                Object.entries(mappings).forEach(([apiKey, domId]) => {
+                    const value = localData[apiKey] || 0;
+                    const element = document.querySelector(`#${domId} .value`);
+                    const pulseElement = document.querySelector(`#${domId} .loading-pulse`);
+                    
+                    if (element && prevValues[domId] !== value.toString()) {
+                        if (pulseElement) {
+                            pulseElement.style.display = 'inline';
+                            setTimeout(() => {
+                                pulseElement.style.display = 'none';
+                                element.textContent = value;
+                            }, 500);
+                        } else {
+                            element.textContent = value;
+                        }
+                        prevValues[domId] = value.toString();
+                    }
+                });
+            })
+            .catch(error => {
+                console.error('Error fetching dashboard stats:', error);
+            });
+    }
+
+    // Initial update
+    updateDashboard();
+
+    // Update every 2 seconds
+    setInterval(updateDashboard, 2000);
+});
+</script>
+{% endblock %}
