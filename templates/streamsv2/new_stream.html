@@ -60,7 +60,8 @@
                     {% for endpoint in endpoints %}
                         <div class="endpoint-card {% if endpoint.uuid == selected_destination_uuid %}selected{% endif %}"
                              data-endpoint-id="{{ endpoint.uuid }}">
-                            <h3>{{ endpoint.name }}</h3>
+                            <h4>{{ endpoint.name }}</h4>
+                            <br>
                             <div class="endpoint-info">
                                 <div>
                                     <span class="endpoint-label">Mode:</span>
@@ -75,6 +76,7 @@
                                     <span>{{ endpoint.endpoint_type|upper }}</span>
                                 </div>
                             </div>
+                            <br>
                             <div class="endpoint-status">
                                 {% if endpoint.status == 'ACTIVE' %}
                                     <span class="status-active">Active from {{ endpoint.last_active|datetime }}</span>
@@ -130,7 +132,8 @@
                     {% for endpoint in endpoints %}
                         <div class="endpoint-card {% if endpoint.uuid == selected_source_uuid %}selected{% endif %}"
                              data-endpoint-id="{{ endpoint.uuid }}">
-                            <h3>{{ endpoint.name }}</h3>
+                            <h4>{{ endpoint.name }}</h4>
+                            <br>
                             <div class="endpoint-info">
                                 <div>
                                     <span class="endpoint-label">Mode:</span>
@@ -145,6 +148,7 @@
                                     <span>{{ endpoint.endpoint_type|upper }}</span>
                                 </div>
                             </div>
+                            <br>
                             <div class="endpoint-status">
                                 {% if endpoint.status == 'ACTIVE' %}
                                     <span class="status-active">Active from {{ endpoint.last_active|datetime }}</span>
@@ -189,7 +193,7 @@
                 </div>
             {% endif %}
 
-            <h2>Final Details</h2>
+            <h3>Final Details</h3>
             <p>Please enter and confirm the final details to create the stream.</p>
 
             <form method="POST" class="final-config">

@@ -4,6 +4,7 @@ from __future__ import annotations
 import threading
 import time
 from typing import Optional, Dict, Any, Union, Tuple, List
+import tempfile
 from datetime import datetime, timedelta
 import uuid
 from abc import ABC, abstractmethod
@@ -113,6 +114,37 @@ class AWSProvider(CloudStorageProvider):
         self.encryption_config = None
         self.kms_key_id = None
         self._default_storage_class = 'STANDARD'
+    
+    def _init_active_endpoint(self):
+        """Minimal initialization for already active endpoint"""
+        # Call parent's minimal initialization
+        super()._init_active_endpoint()
+        
+        try:
+            # Set up basic configuration without reconnecting
+            self.provider = self.config.provider
+            self.storage_config = self.extra_config.get('storage_config', {})
+            
+            # Set default storage class
+            self._default_storage_class = 'STANDARD'  # Default storage class
+            
+            # Initialize metrics structure without connecting
+            self.metrics = StorageMetrics(
+                provider=self.provider,
+                bucket_name=self.storage_config.get('bucket', '')
+            )
+            
+            # Basic setup without connection
+            self.upload_queue = []
+            self.failed_uploads = []
+            self.upload_lock = threading.Lock()
+            
+            # Log reuse of active endpoint
+            self.logger.info(f"Reusing active {self.provider} endpoint {self.config.uuid}")
+            
+        except Exception as e:
+            self.logger.error(f"Error in minimal initialization: {str(e)}")
+            raise
 
     def initialize(self, config: Dict[str, Any]) -> None:
         """Initialize S3 client with configuration"""
@@ -184,67 +216,95 @@ class AWSProvider(CloudStorageProvider):
         except Exception as e:
             raise CloudStorageError(f"Failed to initialize AWS S3 client: {str(e)}")
 
-    def upload_file(self, local_path: str, remote_path: str, 
-                   encryption_config: Optional[Dict] = None) -> str:
-        """Upload file to S3 with encryption and metadata"""
-        if not self.client:
-            raise CloudStorageError("S3 client not initialized")
+    def upload_file(
+    self, 
+    local_path: str, 
+    remote_path: str,
+    encryption_config: Optional[Dict] = None,
+    metadata: Optional[Dict] = None
+) -> Optional[str]:
+        """Upload file to cloud storage"""
+        if not os.path.exists(local_path):
+            self.log_error(f"Local file not found: {local_path}")
+            return None
             
         try:
-            extra_args = {}
-            
-            # Handle encryption configuration
-            enc_config = encryption_config or self.encryption_config
-            if enc_config:
-                enc_type = enc_config.get('type')
-                if enc_type == 'AES256':
-                    extra_args['ServerSideEncryption'] = 'AES256'
-                elif enc_type == 'aws:kms':
-                    extra_args['ServerSideEncryption'] = 'aws:kms'
-                    if self.kms_key_id:
-                        extra_args['SSEKMSKeyId'] = self.kms_key_id
-                elif enc_type == 'customer-provided':
-                    if 'customer_key' in enc_config:
-                        extra_args['SSECustomerAlgorithm'] = 'AES256'
-                        extra_args['SSECustomerKey'] = enc_config['customer_key']
+            message_uuid = str(uuid.uuid4())
             
             # Add metadata if provided
-            if metadata := encryption_config.get('metadata'):
-                extra_args['Metadata'] = metadata
+            if metadata:
+                encryption_config = encryption_config or {}
+                encryption_config['metadata'] = metadata
             
-            # Set storage class
-            storage_class = encryption_config.get('storage_class', self._default_storage_class)
-            if storage_class in self.STORAGE_CLASSES:
-                extra_args['StorageClass'] = storage_class
+            # Ensure storage class is set
+            if encryption_config and 'storage_class' not in encryption_config:
+                encryption_config['storage_class'] = self._default_storage_class
+
+            # Handle basic provider-managed encryption
+            enc_config = encryption_config or self.storage_config.get('encryption', {})
+            if self.provider == 'gcp_storage':
+                enc_config['type'] = 'google-managed'
+            else:  # aws_s3
+                enc_config['type'] = 'AES256'
             
-            # Upload file
-            self.client.upload_file(
-                local_path,
-                self.bucket_name,
+            # Log upload start
+            self.log_message_cycle(
+                message_uuid=message_uuid,
+                event_type="upload_started",
+                details={
+                    "local_path": local_path,
+                    "remote_path": remote_path,
+                    "file_size": os.path.getsize(local_path),
+                    "storage_class": encryption_config.get('storage_class', self._default_storage_class)
+                },
+                status="started"
+            )
+            
+            # Upload file through provider
+            cloud_url = self.storage_client.upload_file(
+                local_path, 
                 remote_path,
-                ExtraArgs=extra_args
+                encryption_config
             )
             
             # Update metrics
-            file_size = os.path.getsize(local_path)
-            self.update_metrics(lambda m: setattr(m, 'files_uploaded', m.files_uploaded + 1))
-            self.update_metrics(lambda m: setattr(m, 'bytes_transferred', 
-                                                m.bytes_transferred + file_size))
-            self.update_metrics(lambda m: setattr(m, 'last_upload_time', datetime.utcnow()))
+            self.metrics['files_uploaded'] += 1
+            self.metrics['bytes_uploaded'] += os.path.getsize(local_path)
+            self.metrics['last_upload_time'] = datetime.utcnow()
             
-            # Log encryption status
-            if not enc_config or enc_config.get('type') == 'none':
-                current_app.logger.info(f"File {remote_path} uploaded without encryption")
-            else:
-                current_app.logger.info(
-                    f"File {remote_path} uploaded with {enc_config['type']} encryption"
-                )
+            # Log success
+            self.log_info(f"File uploaded successfully: {cloud_url}")
+            self.log_message_cycle(
+                message_uuid=message_uuid,
+                event_type="upload_completed",
+                details={"cloud_url": cloud_url},
+                status="success"
+            )
             
-            return f"s3://{self.bucket_name}/{remote_path}"
+            return cloud_url
             
         except Exception as e:
-            self.update_metrics(lambda m: setattr(m, 'upload_errors', m.upload_errors + 1))
-            raise CloudStorageError(f"S3 upload failed: {str(e)}")
+            self.metrics['upload_errors'] += 1
+            self.log_error(f"File upload failed: {str(e)}")
+            
+            # Track failed upload
+            with self.upload_lock:
+                self.failed_uploads.append({
+                    "local_path": local_path,
+                    "remote_path": remote_path,
+                    "error": str(e),
+                    "timestamp": datetime.utcnow()
+                })
+            
+            # Log failure
+            self.log_message_cycle(
+                message_uuid=message_uuid,
+                event_type="upload_failed",
+                details={"error": str(e)},
+                status="error"
+            )
+            
+            return None
 
     def check_connection(self) -> bool:
         """Test S3 connection and basic operations"""
@@ -450,56 +510,29 @@ class GCPProvider(CloudStorageProvider):
         except Exception as e:
             raise CloudStorageError(f"Failed to initialize GCP Storage client: {str(e)}")
 
-    def upload_file(self, local_path: str, remote_path: str, 
-                   encryption_config: Optional[Dict] = None) -> str:
-        """Upload file to GCS with encryption and metadata"""
+    def upload_file(self, local_path: str, remote_path: str, encryption_config: Optional[Dict] = None) -> str:
+        """Upload file to GCS with encryption"""
         if not self.client or not self.bucket:
             raise CloudStorageError("GCS client not initialized")
             
         try:
             blob = self.bucket.blob(remote_path)
             
-            # Handle encryption
-            enc_config = encryption_config or self.encryption_config
-            if enc_config:
-                enc_type = enc_config.get('type')
-                if enc_type == 'customer-managed':
-                    blob.kms_key_name = self.kms_key_name
-                elif enc_type == 'customer-supplied':
-                    if 'encryption_key' in enc_config:
-                        blob.encryption_key = enc_config['encryption_key']
-            
             # Set storage class if specified
-            storage_class = encryption_config.get('storage_class', self._default_storage_class)
+            storage_class = (encryption_config or {}).get('storage_class', self._default_storage_class)
             if storage_class in self.STORAGE_CLASSES:
                 blob.storage_class = storage_class
             
             # Add metadata if provided
-            if metadata := encryption_config.get('metadata'):
+            if metadata := (encryption_config or {}).get('metadata'):
                 blob.metadata = metadata
             
             # Upload file
             blob.upload_from_filename(local_path)
             
-            # Update metrics
-            file_size = os.path.getsize(local_path)
-            self.update_metrics(lambda m: setattr(m, 'files_uploaded', m.files_uploaded + 1))
-            self.update_metrics(lambda m: setattr(m, 'bytes_transferred', 
-                                                m.bytes_transferred + file_size))
-            self.update_metrics(lambda m: setattr(m, 'last_upload_time', datetime.utcnow()))
-            
-            # Log encryption status
-            if not enc_config or enc_config.get('type') == 'none':
-                current_app.logger.info(f"File {remote_path} uploaded with default encryption")
-            else:
-                current_app.logger.info(
-                    f"File {remote_path} uploaded with {enc_type} encryption"
-                )
-            
             return f"gs://{self.bucket.name}/{remote_path}"
             
         except Exception as e:
-            self.update_metrics(lambda m: setattr(m, 'upload_errors', m.upload_errors + 1))
             raise CloudStorageError(f"GCS upload failed: {str(e)}")
 
     def check_connection(self) -> bool:
@@ -625,6 +658,9 @@ class CloudStorageEndpoint(BaseEndpoint):
         # Initialize provider
         self.provider = provider
         self.storage_config = kwargs.get('storage_config', {})
+        
+        # Initialize storage defaults and client
+        self._initialize_storage_defaults()
         self.storage_client = self.SUPPORTED_PROVIDERS[provider]()
         
         # File operation tracking
@@ -632,15 +668,30 @@ class CloudStorageEndpoint(BaseEndpoint):
         self.failed_uploads = []
         self.upload_lock = threading.Lock()
         
-        # Initialize metrics
-        self.metrics.update({
-            'provider': provider,
-            'files_uploaded': 0,
-            'bytes_uploaded': 0,
-            'upload_errors': 0,
-            'connection_errors': 0,
-            'last_upload_time': None
-        })
+        # Initialize basic metrics
+        with self._metrics_lock:
+            self.metrics.set('provider', provider)
+            self.metrics.set('files_uploaded', 0)
+            self.metrics.set('bytes_uploaded', 0)
+            self.metrics.set('upload_errors', 0)
+            self.metrics.set('connection_errors', 0)
+            self.metrics.set('last_upload_time', None)
+
+    def _initialize_storage_defaults(self):
+        """Initialize storage configuration defaults"""
+        # Set defaults based on provider type
+        if self.provider == 'aws_s3':
+            self._default_storage_class = 'STANDARD'
+            self._provider_storage_classes = AWSProvider.STORAGE_CLASSES
+        else:  # gcp_storage
+            self._default_storage_class = 'STANDARD'
+            self._provider_storage_classes = GCPProvider.STORAGE_CLASSES
+        
+        # Log storage configuration
+        self.log_info(
+            f"Initialized storage defaults for {self.provider}: "
+            f"default_class={self._default_storage_class}"
+        )
 
     def start(self) -> bool:
         """Start cloud storage endpoint"""
@@ -705,8 +756,8 @@ class CloudStorageEndpoint(BaseEndpoint):
             return False
 
     def upload_file(self, local_path: str, remote_path: str, 
-                   encryption_config: Optional[Dict] = None,
-                   metadata: Optional[Dict] = None) -> Optional[str]:
+               encryption_config: Optional[Dict] = None,
+               metadata: Optional[Dict] = None) -> Optional[str]:
         """Upload file to cloud storage"""
         if not os.path.exists(local_path):
             self.log_error(f"Local file not found: {local_path}")
@@ -720,6 +771,17 @@ class CloudStorageEndpoint(BaseEndpoint):
                 encryption_config = encryption_config or {}
                 encryption_config['metadata'] = metadata
             
+            # Ensure storage class is set
+            if encryption_config and 'storage_class' not in encryption_config:
+                encryption_config['storage_class'] = self._default_storage_class
+
+            # Handle basic provider-managed encryption
+            enc_config = encryption_config or self.storage_config.get('encryption', {})
+            if self.provider == 'gcp_storage':
+                enc_config['type'] = 'google-managed'
+            else:  # aws_s3
+                enc_config['type'] = 'AES256'
+            
             # Log upload start
             self.log_message_cycle(
                 message_uuid=message_uuid,
@@ -732,7 +794,7 @@ class CloudStorageEndpoint(BaseEndpoint):
                 status="started"
             )
             
-            # Upload file
+            # Upload file through provider
             cloud_url = self.storage_client.upload_file(
                 local_path, 
                 remote_path,
@@ -740,9 +802,10 @@ class CloudStorageEndpoint(BaseEndpoint):
             )
             
             # Update metrics
-            self.metrics['files_uploaded'] += 1
-            self.metrics['bytes_uploaded'] += os.path.getsize(local_path)
-            self.metrics['last_upload_time'] = datetime.utcnow()
+            with self._metrics_lock:
+                self.metrics.increment('files_uploaded')
+                self.metrics.increment('bytes_uploaded', os.path.getsize(local_path))
+                self.metrics.set('last_upload_time', datetime.utcnow())
             
             # Log success
             self.log_info(f"File uploaded successfully: {cloud_url}")
@@ -756,7 +819,9 @@ class CloudStorageEndpoint(BaseEndpoint):
             return cloud_url
             
         except Exception as e:
-            self.metrics['upload_errors'] += 1
+            with self._metrics_lock:
+                self.metrics.increment('upload_errors')
+            
             self.log_error(f"File upload failed: {str(e)}")
             
             # Track failed upload
@@ -920,19 +985,11 @@ class CloudStorageEndpoint(BaseEndpoint):
         return successful, remaining
 
     def validate_storage_class(self, storage_class: str) -> bool:
-        """
-        Validate storage class for current provider
-        
-        Args:
-            storage_class: Storage class to validate
+        """Validate storage class for current provider"""
+        if not hasattr(self, '_provider_storage_classes'):
+            self._initialize_storage_defaults()
             
-        Returns:
-            Boolean indicating if storage class is valid
-        """
-        if self.provider == 'aws_s3':
-            return storage_class in AWSProvider.STORAGE_CLASSES
-        else:  # gcp_storage
-            return storage_class in GCPProvider.STORAGE_CLASSES
+        return storage_class in self._provider_storage_classes
 
     @classmethod
     def validate_config(cls, config: Dict[str, Any]) -> bool:
@@ -968,7 +1025,273 @@ class CloudStorageEndpoint(BaseEndpoint):
         except Exception as e:
             current_app.logger.error(f"Cloud storage config validation error: {str(e)}")
             return False
+        
+    def deliver_message(self, message_content: Dict[str, Any], metadata: Optional[Dict] = None) -> Tuple[bool, Optional[str]]:
+        """Deliver message to cloud storage"""
+        if not self.storage_client:
+            return False, "Storage client not initialized"
 
+        message_uuid = metadata.get('message_uuid') if metadata else str(uuid4())
+        start_time = datetime.utcnow()
+        
+        try:
+            # Create temp file with proper cleanup
+            with tempfile.NamedTemporaryFile(prefix='stream_', suffix='.json', mode='w+b', delete=False) as temp_file:
+                temp_path = temp_file.name
+                # Convert to JSON string and then to bytes before writing
+                json_str = json.dumps(message_content, indent=2)
+                temp_file.write(json_str.encode('utf-8'))
+
+            try:
+                # Log delivery start
+                self.log_info(f"Starting delivery for message {message_uuid} to {self.provider}")
+                self.log_message_cycle(
+                    message_uuid=message_uuid,
+                    event_type="delivery_started",
+                    details={
+                        "provider": self.provider,
+                        "file_size": os.path.getsize(temp_path),
+                        "timestamp": start_time.isoformat()
+                    },
+                    status="started"
+                )
+
+                # Generate cloud path with proper organization
+                timestamp = datetime.utcnow()
+                remote_path = self._generate_storage_path(timestamp, message_uuid, metadata)
+
+                # Prepare delivery configuration
+                delivery_config = self._prepare_delivery_config(metadata)
+
+                # Attempt upload with provider-specific handling
+                try:
+                    result = self.upload_file(
+                        local_path=temp_path,
+                        remote_path=remote_path,
+                        encryption_config=delivery_config,
+                        metadata=metadata
+                    )
+                    
+                    if not result:
+                        raise CloudStorageError("Upload failed - no result returned")
+
+                    return True, None
+
+                except CloudStorageError as cloud_error:
+                    return False, str(cloud_error)
+
+            finally:
+                # Cleanup temp file
+                try:
+                    if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                except Exception as cleanup_error:
+                    self.log_warning(f"Error cleaning up temp file: {str(cleanup_error)}")
+
+        except Exception as e:
+            error_msg = f"Delivery error: {str(e)}"
+            self.log_error(error_msg)
+            return False, error_msg
+    
+    def _generate_storage_path(self, timestamp: datetime, message_uuid: str, metadata: Optional[Dict] = None) -> str:
+        """Generate structured storage path"""
+        try:
+            # Base path structure
+            path_parts = [
+                timestamp.strftime('%Y'),
+                timestamp.strftime('%m'),
+                timestamp.strftime('%d'),
+                metadata.get('stream_uuid', 'unknown_stream'),
+                f"{message_uuid}.json"
+            ]
+
+            # Add organization prefix if available
+            if org_uuid := metadata.get('organization_uuid'):
+                path_parts.insert(0, org_uuid)
+
+            # Add message type directory if available
+            if msg_type := metadata.get('message_type', '').lower().replace(' ', '_'):
+                path_parts.insert(-1, msg_type)
+
+            return '/'.join(path_parts)
+
+        except Exception as e:
+            self.log_error(f"Error generating storage path: {str(e)}")
+            # Fallback path
+            return f"{timestamp.strftime('%Y/%m/%d')}/{message_uuid}.json"
+
+    def _prepare_delivery_config(self, metadata: Optional[Dict] = None) -> Dict[str, Any]:
+        """Prepare delivery configuration including encryption"""
+        # Basic encryption based on provider
+        encryption_type = 'google-managed' if self.provider == 'gcp_storage' else 'AES256'
+        
+        config = {
+            'encryption': {
+                'type': encryption_type
+            },
+            'storage_class': self.storage_config.get('storage_class', self._default_storage_class),
+            'metadata': {
+                'timestamp': datetime.utcnow().isoformat(),
+                'source': 'streamsv2',
+                **(metadata or {})
+            }
+        }
+
+        return config
+
+    def _handle_provider_error(self, error: CloudStorageError) -> str:
+        """Handle provider-specific errors with proper categorization"""
+        if self.provider == 'aws_s3':
+            return self._handle_s3_error(error)
+        else:  # gcp_storage
+            return self._handle_gcs_error(error)
+
+    def _handle_s3_error(self, error: CloudStorageError) -> str:
+        """Handle AWS S3 specific errors"""
+        error_msg = str(error)
+        if isinstance(error.__cause__, ClientError):
+            error_code = error.__cause__.response['Error'].get('Code', '')
+            if error_code in ['NoSuchBucket', 'NoSuchKey']:
+                return f"S3 resource not found: {error_code}"
+            elif error_code in ['AccessDenied', 'InvalidAccessKeyId']:
+                return f"S3 authentication error: {error_code}"
+            elif error_code == 'RequestTimeout':
+                return "S3 request timeout"
+        return f"S3 error: {error_msg}"
+
+    def _handle_gcs_error(self, error: CloudStorageError) -> str:
+        """Handle Google Cloud Storage specific errors"""
+        error_msg = str(error)
+        if isinstance(error.__cause__, gcp_exceptions.GoogleAPIError):
+            if isinstance(error.__cause__, gcp_exceptions.NotFound):
+                return "GCS resource not found"
+            elif isinstance(error.__cause__, gcp_exceptions.Forbidden):
+                return "GCS authentication error"
+            elif isinstance(error.__cause__, gcp_exceptions.ServiceUnavailable):
+                return "GCS service unavailable"
+        return f"GCS error: {error_msg}"
+
+    def validate_message_format(self, message_content: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """Validate message format for cloud storage"""
+        try:
+            # Check if message is a dict
+            if not isinstance(message_content, dict):
+                return False, "Message must be a dictionary"
+
+            # Check required fields based on message type
+            if self.config.message_type.startswith('HL7v2'):
+                required_fields = ['message_id', 'message', 'metadata']
+            elif self.config.message_type.startswith('CCDA'):
+                required_fields = ['message_id', 'document', 'metadata']
+            elif self.config.message_type.startswith('X12'):
+                required_fields = ['message_id', 'transaction', 'metadata']
+            elif self.config.message_type.startswith('Clinical Notes'):
+                required_fields = ['message_id', 'note', 'metadata']
+            else:
+                return False, f"Unsupported message type: {self.config.message_type}"
+
+            # Validate required fields
+            missing_fields = [field for field in required_fields if field not in message_content]
+            if missing_fields:
+                return False, f"Missing required fields: {', '.join(missing_fields)}"
+
+            # Validate metadata structure
+            metadata = message_content.get('metadata', {})
+            if not isinstance(metadata, dict):
+                return False, "Metadata must be a dictionary"
+
+            # Attempt JSON serialization to validate structure
+            try:
+                json.dumps(message_content)
+            except (TypeError, ValueError) as e:
+                return False, f"Invalid JSON structure: {str(e)}"
+
+            return True, None
+
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
+
+    def process_destination_message(self, message: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """
+        Process a destination message
+        
+        Args:
+            message: Destination message document
+            
+        Returns:
+            Tuple[bool, str]: (success, error_message)
+        """
+        try:
+            message_uuid = message['uuid']
+            original_content = message.get('transformed_content')
+            
+            if not original_content:
+                return False, "No transformed content found"
+
+            # Add delivery metadata
+            delivery_metadata = {
+                "destination_message_uuid": message_uuid,
+                "original_message_uuid": message.get('original_message_uuid'),
+                "stream_uuid": message.get('stream_uuid'),
+                "delivery_timestamp": datetime.utcnow().isoformat(),
+                "endpoint_type": self.config.endpoint_type,
+                "provider": self.provider
+            }
+
+            # Attempt delivery
+            success, error = self.deliver_message(
+                message_content=original_content,
+                metadata=delivery_metadata
+            )
+
+            if success:
+                # Update destination message status
+                result = self.db.destination_messages.update_one(
+                    {"uuid": message_uuid},
+                    {
+                        "$set": {
+                            "destinations.$[dest].status": "COMPLETED",
+                            "destinations.$[dest].completed_at": datetime.utcnow(),
+                            "overall_status": "COMPLETED",
+                            "updated_at": datetime.utcnow()
+                        }
+                    },
+                    array_filters=[{"dest.endpoint_uuid": self.config.uuid}]
+                )
+                
+                if not result.modified_count:
+                    return False, "Failed to update message status"
+
+                return True, None
+            else:
+                return False, error
+
+        except Exception as e:
+            return False, str(e)
+
+    def _update_delivery_metrics(self, success: bool, duration: float, size: int) -> None:
+        """Update delivery metrics"""
+        try:
+            with self._metrics_lock:
+                if success:
+                    self.metrics.increment('successful_deliveries')
+                    self.metrics.increment('bytes_delivered', size)
+                    self.metrics.update('last_successful_delivery', datetime.utcnow())
+                    self.metrics.update('average_delivery_time', 
+                        self._calculate_moving_average('average_delivery_time', duration))
+                else:
+                    self.metrics.increment('failed_deliveries')
+                
+                # Update throughput metrics
+                current_window = int(time.time() / 60)  # 1-minute windows
+                if current_window != self.metrics.get('current_window'):
+                    self.metrics.reset('current_window_deliveries')
+                    self.metrics.update('current_window', current_window)
+                self.metrics.increment('current_window_deliveries')
+
+        except Exception as e:
+            self.log_error(f"Error updating delivery metrics: {str(e)}")
+            
     def __str__(self) -> str:
         """String representation"""
         return (f"CloudStorageEndpoint(uuid={self.config.uuid}, name={self.config.name}, "
@@ -981,3 +1304,4 @@ class CloudStorageEndpoint(BaseEndpoint):
                 f"endpoint_type={self.config.endpoint_type}, "
                 f"organization_uuid={self.config.organization_uuid}, "
                 f"provider={self.provider}, active={self.config.active})")
+    

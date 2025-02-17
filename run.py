@@ -25,7 +25,7 @@ beat_process = None
 flower_process = None
 
 def start_celery_worker():
-    """Start Celery worker process"""
+    """Start Celery worker process with enhanced configuration"""
     global worker_process
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + env.get('PYTHONPATH', '')
@@ -36,6 +36,10 @@ def start_celery_worker():
         'worker',
         '--loglevel=info',
         '-Q', (
+            'stream_processing,'  # StreamsV2 queues first for priority
+            'stream_monitoring,'
+            'delivery_queue,'
+            'stream_maintenance,'
             'hl7v2_conversion,'
             'clinical_notes_conversion,'
             'ccda_conversion,'
@@ -48,8 +52,17 @@ def start_celery_worker():
             'validation_queue,'
             'maintenance_queue,'
             'metrics_queue'
-        )
+        ),
+        '--pool=prefork',  # Explicit pool setting
+        '--concurrency=4',  # Adjust based on your needs
+        '--max-tasks-per-child=1000',  # Prevent memory leaks
+        '--max-memory-per-child=50000',  # 50MB limit
+        '--time-limit=300',  # 5 minute hard limit
+        '--soft-time-limit=240',  # 4 minute soft limit
+        '--prefetch-multiplier=1',  # One task at a time
+        '-O', 'fair'  # Fair task distribution
     ]
+    
     worker_process = subprocess.Popen(
         cmd, 
         env=env, 
@@ -61,7 +74,7 @@ def start_celery_worker():
     return worker_process
 
 def start_celery_beat():
-    """Start Celery beat process"""
+    """Start Celery beat process with enhanced configuration"""
     global beat_process
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + env.get('PYTHONPATH', '')
@@ -70,45 +83,61 @@ def start_celery_beat():
         sys.executable, '-m', 'celery',
         '-A', 'app.extensions.celery_worker:celery',
         'beat',
-        '--loglevel=info'
+        '--loglevel=info',
+        '--scheduler', 'django_celery_beat.schedulers:DatabaseScheduler',  # Use persistent scheduler
+        '--max-interval', '60',  # Maximum time between schedule checks
+        '--schedule', '/tmp/celerybeat-schedule',  # Persistent schedule file
+        '--pidfile', '/tmp/celerybeat.pid'  # PID file location
     ]
+    
+    # Create logs directory if it doesn't exist
+    os.makedirs('logs', exist_ok=True)
+    os.makedirs('logs/celery', exist_ok=True)
+    
+    # Set up log files
+    beat_log = open('logs/celery/celerybeat.log', 'a')
+    beat_error_log = open('logs/celery/celerybeat_error.log', 'a')
+    
     beat_process = subprocess.Popen(
         cmd, 
         env=env, 
-        stdout=subprocess.PIPE, 
-        stderr=subprocess.PIPE,
+        stdout=beat_log,
+        stderr=beat_error_log,
         universal_newlines=True,
         bufsize=1
     )
     return beat_process
 
 def start_flower():
-    """Start Flower monitoring dashboard"""
+    """Start Flower monitoring dashboard with enhanced security"""
     global flower_process
     env = os.environ.copy()
     env['PYTHONPATH'] = os.path.dirname(os.path.abspath(__file__)) + os.pathsep + env.get('PYTHONPATH', '')
     
     cmd = [
-        sys.executable, '-m', 'celery',  # Use python -m celery instead of direct flower command
+        sys.executable, '-m', 'celery',
         '-A', 'app.extensions.celery_worker:celery',
         'flower',
         '--port=5555',
-        '--address=0.0.0.0',  # Allow external access
+        '--address=0.0.0.0',
         '--broker=' + app.config['REDIS_URL'],
-        '--result_backend=' + app.config['REDIS_URL'],
+        '--broker_api=' + app.config['REDIS_URL'],
         '--basic_auth=' + os.environ.get('FLOWER_AUTH', 'admin:admin'),
-        '--url_prefix=flower',  # Optional: add URL prefix for reverse proxy
-        '--persistent=True',  # Enable persistent mode
-        '--state_save_interval=60000',  # Save state every minute
-        '--logging=info'  # Enable detailed logging
+        '--url_prefix=flower',
+        '--persistent=True',
+        '--state_save_interval=60000',
+        '--max_tasks=100000',
+        '--tasks_columns=name,uuid,state,received,started,runtime,worker',
+        '--natural_time=True',
+        '--logging=info'
     ]
     
-    # Create logs directory if it doesn't exist
-    os.makedirs('logs', exist_ok=True)
+    # Create logs directory
+    os.makedirs('logs/celery', exist_ok=True)
     
     # Set up log files
-    flower_log = open('logs/flower.log', 'a')
-    flower_error_log = open('logs/flower_error.log', 'a')
+    flower_log = open('logs/celery/flower.log', 'a')
+    flower_error_log = open('logs/celery/flower_error.log', 'a')
     
     flower_process = subprocess.Popen(
         cmd,
@@ -149,7 +178,7 @@ def check_redis():
         return False
 
 def check_process_health():
-    """Check health of all processes"""
+    """Enhanced health check for all processes"""
     critical_processes = [
         (worker_process, "Celery worker"),
         (beat_process, "Celery beat")
@@ -159,6 +188,11 @@ def check_process_health():
         (flower_process, "Flower")
     ]
     
+    # Check Redis connection
+    if not check_redis():
+        logger.error("Redis connection failed")
+        return False
+    
     # Check critical processes
     for process, name in critical_processes:
         if process and process.poll() is not None:
@@ -166,22 +200,40 @@ def check_process_health():
             # Read any error output
             if process.stderr:
                 error_output = process.stderr.read()
-                app_logger.error(f"{name} process error output: {error_output}")
-            app_logger.error(f"{name} process died with return code {return_code}")
+                logger.error(f"{name} process error output: {error_output}")
+            logger.error(f"{name} process died with return code {return_code}")
             return False
             
     # Check optional processes
     for process, name in optional_processes:
         if process and process.poll() is not None:
             return_code = process.poll()
-            app_logger.warning(f"{name} process died with return code {return_code}")
+            logger.warning(f"{name} process died with return code {return_code}")
             # Try to restart Flower
             try:
                 restart_flower()
             except Exception as e:
-                app_logger.error(f"Failed to restart {name}: {str(e)}")
+                logger.error(f"Failed to restart {name}: {str(e)}")
+    
+    # Check queue health
+    try:
+        redis_client = redis.Redis.from_url(app.config['REDIS_URL'])
+        queues = [
+            'stream_processing',
+            'stream_monitoring',
+            'delivery_queue',
+            'stream_maintenance'
+        ]
+        
+        for queue in queues:
+            queue_length = redis_client.llen(f'celery_{queue}')
+            if queue_length > app.config.get('QUEUE_LENGTH_THRESHOLD', 1000):
+                logger.warning(f"Queue {queue} length ({queue_length}) exceeds threshold")
+    except Exception as e:
+        logger.error(f"Error checking queue health: {str(e)}")
     
     return True
+
 
 def signal_handler(signum, frame):
     """Handle shutdown signals"""
@@ -240,7 +292,7 @@ def restart_flower():
             app_logger.error(f"Failed to restart Flower: {str(e)}")
 
 def run_app():
-    """Run the complete application"""
+    """Run the complete application with enhanced process management"""
     app_logger.info("Starting the Flask application")
 
     if not check_redis():

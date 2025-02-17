@@ -13,7 +13,12 @@ from app.auth import init_oauth
 from flask_wtf.csrf import CSRFProtect
 from app.services.health_data_converter import init_health_data_converter
 from app.services.fhir_service import initialize_fhir_interfaces
+from logging.handlers import RotatingFileHandler
 
+# Initialize logging
+logger = logging.getLogger(__name__)
+
+# Initialize Flask-WTF CSRF protection
 csrf = CSRFProtect()
 
 # Initialize Celery at module level
@@ -40,138 +45,99 @@ def init_celery(app=None):
 
     celery.Task = ContextTask
 
-    # Configure celery beat schedule
-    celery.conf.beat_schedule = {
-        'process-all-message-types': {
-            'task': 'app.tasks.process_all_message_types',
-            'schedule': app.config['PROCESS_PENDING_CONVERSIONS_INTERVAL'],
-        },
-        'cleanup-old-messages': {
-            'task': 'app.tasks.cleanup_old_messages',
-            'schedule': app.config['CLEANUP_OLD_MESSAGES_INTERVAL'],
-            'args': (30,)
-        },
-        'check-stuck-messages': {
-            'task': 'app.tasks.check_stuck_messages',
-            'schedule': app.config['CHECK_STUCK_MESSAGES_INTERVAL'],
-        },
-        'fetch-fhir-data': {
-            'task': 'app.tasks.fetch_fhir_data',
-            'schedule': app.config['FETCH_FHIR_INTERVAL'],
-        },
-        'parse-files': {
-            'task': 'app.tasks.parse_files',
-            'schedule': app.config['PARSE_FILES_INTERVAL'],
-        },
-        'validate-fhir-messages': {
-            'task': 'app.tasks.validate_fhir_messages',
-            'schedule': app.config['VALIDATE_FHIR_MESSAGES_INTERVAL'],
-        },
-        'log-conversion-metrics': {
-            'task': 'app.tasks.log_conversion_metrics',
-            'schedule': app.config['LOG_CONVERSION_METRICS_INTERVAL'],
-        },
-        'scheduled-maintenance': {
-            'task': 'app.tasks.scheduled_maintenance',
-            'schedule': app.config['SCHEDULED_MAINTENANCE_INTERVAL'],
-        },
-        'refresh-fhir-interfaces': {
-            'task': 'app.tasks.refresh_fhir_interfaces',
-            'schedule': app.config['REFRESH_FHIR_INTERFACES_INTERVAL'],
-        },
-    }
+def setup_logging(app):
+    """Configure application logging"""
+    if not app.debug and not app.testing:
+        # Create logs directory if it doesn't exist
+        if not os.path.exists('logs'):
+            os.mkdir('logs')
+        if not os.path.exists('logs/celery'):
+            os.mkdir('logs/celery')
+        if not os.path.exists('logs/streams'):
+            os.mkdir('logs/streams')
 
-    return celery
+        # Main application log
+        file_handler = RotatingFileHandler(
+            'logs/rails_health.log',
+            maxBytes=10240000,
+            backupCount=10
+        )
+        file_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+        ))
+        file_handler.setLevel(logging.INFO)
+        app.logger.addHandler(file_handler)
 
-def create_app(config_class=Config):
-    """Create and configure the Flask application"""
-    app = Flask(__name__,
-                template_folder=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'templates')),
-                static_folder=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static')))
-    
-    # Load configuration
-    app.config.from_object(config_class)
+        # Dedicated error log
+        error_handler = RotatingFileHandler(
+            'logs/error.log',
+            maxBytes=10240000,
+            backupCount=5
+        )
+        error_handler.setFormatter(logging.Formatter(
+            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
+        ))
+        error_handler.setLevel(logging.ERROR)
+        app.logger.addHandler(error_handler)
 
-    # Initialize extensions
-    init_extensions(app)
-    init_oauth(app)
-    csrf.init_app(app)
+        app.logger.setLevel(logging.INFO)
+        app.logger.info('Rails Health startup')
 
-    # Initialize Celery
-    init_celery(app)
-
-    # Initialize Flask-Admin
+def init_mongodb(app):
+    """Initialize MongoDB collections and indexes"""
     with app.app_context():
-        from .admin import init_admin
-        init_admin(app)
-
-    # Set up FHIR components
-    yaml_path = os.path.join(app.root_path, 'config', 'fhir_mapping.yaml')
-    app.config['FHIR_MAPPING_FILE'] = yaml_path
-    app.fhir_translator = FHIRTranslator(app.config['FHIR_MAPPING_FILE'])
-    init_fhir_validator(app)
-
-    # Initialize services
-    with app.app_context():
-        init_health_data_converter(app, mongo)
-        initialize_fhir_interfaces()
-
-    # Register blueprints
-    from app.routes import (
-        main, messages, logs, organizations, 
-        accounts, templates, settings, endpoints, orgs
-    )
-    from app.routes.streamsv2 import bp as streamsv2_bp
-    from app.auth import bp as auth_bp
-    
-    app.register_blueprint(main.bp)
-    app.register_blueprint(auth_bp)
-    # Register streamsv2_bp with the correct URL prefix
-    app.register_blueprint(streamsv2_bp)  # Remove the url_prefix='/streams'
-    app.register_blueprint(messages.bp, url_prefix='/messages')
-    app.register_blueprint(logs.bp, url_prefix='/logs')
-    app.register_blueprint(organizations.bp, url_prefix='/organizations')
-    app.register_blueprint(accounts.bp, url_prefix='/accounts')
-    app.register_blueprint(endpoints.bp, url_prefix='/endpoints')
-    app.register_blueprint(templates.bp, url_prefix='/templates')
-    app.register_blueprint(settings.bp, url_prefix='/settings')
-    app.register_blueprint(orgs.bp, url_prefix='/orgs')
-
-
-    # Initialize MongoDB collections
-    with app.app_context():
-        collections = ['users', 'organizations', 'parsing_logs', 
-                      'validation_logs', 'message_cycle_logs']
+        # Core collections
+        collections = [
+            'users', 
+            'organizations', 
+            'parsing_logs',
+            'validation_logs', 
+            'message_cycle_logs',
+            'streams_v2',
+            'destination_messages',
+            'delivery_logs',
+            'activity_logs',
+            'stream_event_logs',
+            'failed_logs'
+        ]
+        
         for collection in collections:
             if collection not in mongo.db.list_collection_names():
                 mongo.db.create_collection(collection)
-        
-        # Update existing streams
-        mongo.db.streams.update_many(
-            {"files_processed": {"$exists": False}},
-            {"$set": {"files_processed": 0}}
-        )
 
-    # Add middleware
-    app.before_request(set_user_and_org_context)
+        try:
+            # Create/update indexes
+            mongo.db.messages.create_index([("timestamp", -1)])
+            mongo.db.messages.create_index([("uuid", 1)], unique=True)
+            mongo.db.messages.create_index([("conversion_status", 1), ("type", 1)])
+            mongo.db.messages.create_index([("organization_uuid", 1)])
+            
+            # Stream-related indexes
+            mongo.db.destination_messages.create_index([
+                ("status", 1),
+                ("next_retry_at", 1)
+            ])
+            mongo.db.destination_messages.create_index([
+                ("stream_uuid", 1),
+                ("status", 1)
+            ])
+            mongo.db.destination_messages.create_index("original_message_uuid")
+            
+            # Logging indexes
+            mongo.db.message_cycle_logs.create_index([
+                ("message_uuid", 1),
+                ("timestamp", 1)
+            ])
+            mongo.db.stream_event_logs.create_index([
+                ("stream_uuid", 1),
+                ("timestamp", 1)
+            ])
 
-    # Add context processor for templates
-    @app.context_processor
-    def inject_user_and_org():
-        return dict(
-            user=g.user,
-            organization=g.organization,
-            user_role=g.user_role,
-            get_user_organizations=get_user_organizations,
-            set_current_organization=set_current_organization
-        )
+        except Exception as e:
+            logger.error(f"Error creating/updating indexes: {str(e)}")
 
-    # Create default stream and organization
-    with app.app_context():
-        _setup_default_stream()
-        create_default_org_and_admins(app)
-
-    # Register error handlers
+def register_error_handlers(app):
+    """Register application error handlers"""
     @app.errorhandler(404)
     def not_found_error(error):
         app.logger.error('404 error occurred: %s', str(error))
@@ -182,12 +148,7 @@ def create_app(config_class=Config):
         app.logger.error('500 error occurred: %s', str(error))
         return render_template('500.html'), 500
 
-    # Set up logging
-    _setup_logging(app)
-
-    return app
-
-def _setup_default_stream():
+def create_default_stream():
     """Create default 'Pasted Messages' stream if it doesn't exist"""
     pasted_stream = mongo.db.streams.find_one({"name": "Pasted Messages"})
     if not pasted_stream:
@@ -210,7 +171,7 @@ def create_default_org_and_admins(app):
     from app.models.user import User
     from app.models.organization import Organization
     
-    # Create default organization
+    # Create default organization if it doesn't exist
     default_org = next((org for org in Organization.list_all() 
                        if org['name'] == app.config['DEFAULT_ORGANIZATION_NAME']), None)
     if not default_org:
@@ -218,11 +179,11 @@ def create_default_org_and_admins(app):
             name=app.config['DEFAULT_ORGANIZATION_NAME'],
             org_type="Healthcare Provider"
         )
-        app.logger.info(f"Created default organization: {app.config['DEFAULT_ORGANIZATION_NAME']}")
+        logger.info(f"Created default organization: {app.config['DEFAULT_ORGANIZATION_NAME']}")
     else:
         org_uuid = default_org['uuid']
 
-    # Update Pasted Messages stream
+    # Update Pasted Messages stream with organization
     mongo.db.streams.update_one(
         {"name": "Pasted Messages"},
         {"$set": {"organization_uuid": org_uuid}}
@@ -239,42 +200,131 @@ def create_default_org_and_admins(app):
                 profile_picture_url=""
             )
             User.add_to_organization(user_uuid, org_uuid, role='admin')
-            app.logger.info(f"Added admin panel user: {email}")
-        elif org_uuid not in [org['uuid'] for org in user.get('organizations', [])]:
-            User.add_to_organization(user['uuid'], org_uuid, role='admin')
-            app.logger.info(f"Added existing user {email} to default organization as admin")
+            logger.info(f"Added admin user: {email}")
 
-def init_message_cycle_logs_indexes():
+def create_app(config_class=Config):
+    """Create and configure the Flask application"""
+    app = Flask(__name__,
+                template_folder=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'templates')),
+                static_folder=os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static')))
+    
+    # Load configuration
+    app.config.from_object(config_class)
+
+    # Setup logging first
+    setup_logging(app)
+    logger.info("Starting application initialization")
+
     try:
-        # Index on message_uuid for quick lookup
-        mongo.db.message_cycle_logs.create_index("message_uuid")
+        # Initialize core extensions
+        logger.info("Initializing core extensions")
+        init_extensions(app)
+        init_oauth(app)
+        csrf.init_app(app)
+
+        # Initialize MongoDB before Celery
+        logger.info("Initializing MongoDB")
+        init_mongodb(app)
+
+        # Initialize Celery after MongoDB
+        logger.info("Initializing Celery")
+        from app.extensions.celery_ext import init_celery
+        app.celery = init_celery(app)  # Store celery instance on app
+
+        # Initialize Flask-Admin
+        logger.info("Initializing Admin interface")
+        with app.app_context():
+            from .admin import init_admin
+            init_admin(app)
+
+        # Set up FHIR components
+        logger.info("Initializing FHIR components")
+        yaml_path = os.path.join(app.root_path, 'config', 'fhir_mapping.yaml')
+        app.config['FHIR_MAPPING_FILE'] = yaml_path
+        app.fhir_translator = FHIRTranslator(app.config['FHIR_MAPPING_FILE'])
+        init_fhir_validator(app)
+
+        # Initialize services within app context
+        logger.info("Initializing application services")
+        with app.app_context():
+            init_health_data_converter(app, mongo)
+            initialize_fhir_interfaces()
+
+        # Initialize StreamsV2 after all base services
+        logger.info("Initializing StreamsV2")
+        from app.streamsv2 import init_app as init_streamsv2
+        init_streamsv2(app)
+
+        # Register all blueprints
+        logger.info("Registering blueprints")
+        from app.routes import (
+            main, messages, logs, organizations, 
+            accounts, templates, settings, endpoints, orgs
+        )
+        from app.auth import bp as auth_bp
         
-        # Compound index for message lookup with timestamp sorting
-        mongo.db.message_cycle_logs.create_index([
-            ("message_uuid", 1),
-            ("timestamp", 1)
-        ])
-        
-        # Index for searching logs in details
-        mongo.db.message_cycle_logs.create_index("details.mongodb_id")
-        
+        app.register_blueprint(main.bp)
+        app.register_blueprint(auth_bp)
+        app.register_blueprint(messages.bp, url_prefix='/messages')
+        app.register_blueprint(logs.bp, url_prefix='/logs')
+        app.register_blueprint(organizations.bp, url_prefix='/organizations')
+        app.register_blueprint(accounts.bp, url_prefix='/accounts')
+        app.register_blueprint(endpoints.bp, url_prefix='/endpoints')
+        app.register_blueprint(templates.bp, url_prefix='/templates')
+        app.register_blueprint(settings.bp, url_prefix='/settings')
+        app.register_blueprint(orgs.bp, url_prefix='/orgs')
+
+        # Register error handlers
+        register_error_handlers(app)
+
+        # Add middleware
+        app.before_request(set_user_and_org_context)
+
+        # Add context processor for templates
+        @app.context_processor
+        def inject_user_and_org():
+            return dict(
+                user=g.user,
+                organization=g.organization,
+                user_role=g.user_role,
+                get_user_organizations=get_user_organizations,
+                set_current_organization=set_current_organization
+            )
+
+        # Create default stream and organization
+        logger.info("Setting up default stream and organization")
+        with app.app_context():
+            create_default_stream()
+            create_default_org_and_admins(app)
+
+        # Register Celery tasks AFTER all blueprints and services are initialized
+        logger.info("Registering Celery tasks")
+        with app.app_context():
+            # First import all task modules
+            from app.streamsv2.core import stream_tasks
+            from app import tasks
+
+            # Force Celery to discover tasks
+            app.celery.autodiscover_tasks([
+                'app.streamsv2.core',
+                'app.tasks',
+                'app.services'
+            ], force=True)
+            
+            # Verify task registration
+            registered_tasks = app.celery.tasks.keys()
+            logger.info("Registered tasks: %s", registered_tasks)
+
+            # Verify queue configuration
+            queue_names = [q.name for q in app.celery.conf.task_queues]
+            logger.info("Configured queues: %s", queue_names)
+
+        logger.info("Application initialization completed successfully")
+        return app
+
     except Exception as e:
-        current_app.logger.error(f"Error creating message_cycle_logs indexes: {str(e)}")
-
-def _setup_logging(app):
-    """Configure application logging"""
-    if not app.debug and not app.testing:
-        if not os.path.exists('logs'):
-            os.mkdir('logs')
-        file_handler = logging.FileHandler('logs/rails_health.log')
-        file_handler.setFormatter(logging.Formatter(
-            '%(asctime)s %(levelname)s: %(message)s [in %(pathname)s:%(lineno)d]'
-        ))
-        file_handler.setLevel(logging.INFO)
-        app.logger.addHandler(file_handler)
-
-    app.logger.setLevel(logging.INFO)
-    app.logger.info('Rails Health startup')
-
+        logger.error(f"Error during application initialization: {str(e)}", exc_info=True)
+        raise
+    
 # Import tasks at the end to avoid circular imports
 from app import tasks

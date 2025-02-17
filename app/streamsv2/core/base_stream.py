@@ -1,20 +1,29 @@
 # app/streamsv2/core/base_stream.py
 
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, List, Tuple
+from typing import Dict, Any, Optional, Tuple
 from datetime import datetime
-import uuid
 import logging
+from abc import ABC
 from flask import current_app
+
 from app.extensions import mongo
-from app.utils.logging_utils import log_message_cycle
 from app.streamsv2.models.stream_config import StreamConfig
-from app.streamsv2.models.stream_status import StreamStatus
+from app.streamsv2.models.stream_status import StreamStatus, StatusManager
+from app.streamsv2.utils.stream_logger import StreamLogger
+from app.streamsv2.models.message_tracker import MessageTracker
+from app.endpoints.registry import endpoint_registry
 
 logger = logging.getLogger(__name__)
 
+class StreamError(Exception):
+    """Base exception for stream errors"""
+    pass
+
 class BaseStream(ABC):
-    """Base class for all stream types"""
+    """
+    Base class for all stream implementations.
+    Handles core stream functionality and lifecycle management.
+    """
 
     def __init__(self, config: StreamConfig):
         """Initialize base stream"""
@@ -25,47 +34,212 @@ class BaseStream(ABC):
         self.destination_endpoint_uuid = config.destination_endpoint_uuid
         self.message_type = config.message_type
         
-        # Initialize core properties
+        # Initialize components
+        self.logger = StreamLogger(self.uuid)
+        self.message_tracker = MessageTracker(self.uuid)
         self.active = False
         self.status = StreamStatus.INACTIVE
-        self.last_processed = None
-        self.metrics = {
-            'messages_processed': 0,
-            'messages_failed': 0,
-            'bytes_transferred': 0,
-            'last_error': None,
-            'processing_history': []
-        }
+        
+        # Get endpoint registry reference
+        self.endpoint_registry = endpoint_registry
 
     @classmethod
-    def create(cls, stream_data: Dict[str, Any]) -> 'BaseStream':
+    async def create(cls, stream_data: Dict[str, Any]) -> Optional['BaseStream']:
         """Create new stream instance"""
         try:
             # Create stream config
             config = StreamConfig(**stream_data)
             
             # Validate configuration
-            is_valid, error = config.validate()
+            is_valid, error = await config.validate()
             if not is_valid:
-                raise ValueError(f"Invalid stream configuration: {error}")
+                raise StreamError(f"Invalid stream configuration: {error}")
+            
+            # Verify endpoints in registry
+            if not endpoint_registry.get_endpoint(config.source_endpoint_uuid):
+                raise StreamError("Source endpoint not found in registry")
+            if not endpoint_registry.get_endpoint(config.destination_endpoint_uuid):
+                raise StreamError("Destination endpoint not found in registry")
             
             # Create stream instance
             stream = cls(config)
             
-            # Store in database
-            result = stream._store_configuration()
-            if not result:
-                raise Exception("Failed to store stream configuration")
+            # Store in database with endpoint info
+            if not await stream._store_configuration():
+                raise StreamError("Failed to store stream configuration")
             
             return stream
             
         except Exception as e:
             logger.error(f"Error creating stream: {str(e)}")
-            raise
+            return None
 
-    def _store_configuration(self) -> bool:
-        """Store stream configuration in database"""
+    async def start(self) -> bool:
+        """Start stream processing"""
         try:
+            if self.status == StreamStatus.ACTIVE:
+                logger.warning(f"Stream {self.uuid} is already active")
+                return True
+
+            # Initialize and validate endpoints through registry
+            valid, error = await self._validate_endpoints()
+            if not valid:
+                raise StreamError(f"Endpoint validation failed: {error}")
+
+            # Start endpoints if needed
+            source_endpoint = self.endpoint_registry.get_endpoint(self.source_endpoint_uuid)
+            if source_endpoint and not source_endpoint.config.active:
+                if not self.endpoint_registry.start_endpoint(self.source_endpoint_uuid):
+                    raise StreamError("Failed to start source endpoint")
+
+            dest_endpoint = self.endpoint_registry.get_endpoint(self.destination_endpoint_uuid)
+            if dest_endpoint and not dest_endpoint.config.active:
+                if not self.endpoint_registry.start_endpoint(self.destination_endpoint_uuid):
+                    raise StreamError("Failed to start destination endpoint")
+
+            # Update status atomically
+            result = await mongo.db.streams_v2.find_one_and_update(
+                {
+                    "uuid": self.uuid,
+                    "status": {"$ne": StreamStatus.DELETED},
+                    "deleted": {"$ne": True}
+                },
+                {
+                    "$set": {
+                        "status": StreamStatus.ACTIVE,
+                        "active": True,
+                        "last_active": datetime.utcnow(),
+                        "updated_at": datetime.utcnow(),
+                        "endpoints": {
+                            "source": {
+                                "uuid": self.source_endpoint_uuid,
+                                "status": "ACTIVE",
+                                "last_check": datetime.utcnow()
+                            },
+                            "destination": {
+                                "uuid": self.destination_endpoint_uuid,
+                                "status": "ACTIVE",
+                                "last_check": datetime.utcnow()
+                            }
+                        }
+                    }
+                },
+                return_document=True
+            )
+
+            if not result:
+                raise StreamError("Failed to update stream status")
+
+            self.status = StreamStatus.ACTIVE
+            self.active = True
+
+            await self.logger.log_event(
+                "stream_started",
+                {
+                    "source_endpoint": {
+                        "uuid": self.source_endpoint_uuid,
+                        "type": source_endpoint.config.endpoint_type if source_endpoint else "UNKNOWN"
+                    },
+                    "destination_endpoint": {
+                        "uuid": self.destination_endpoint_uuid,
+                        "type": dest_endpoint.config.endpoint_type if dest_endpoint else "UNKNOWN"
+                    }
+                },
+                "success"
+            )
+            
+            return True
+            
+        except Exception as e:
+            await self.logger.log_event(
+                "stream_start_failed",
+                {"error": str(e)},
+                "error"
+            )
+            return False
+
+    async def stop(self, reason: str = "Stream stopped by user") -> bool:
+        """Stop stream processing"""
+        try:
+            if self.status != StreamStatus.ACTIVE:
+                logger.warning(f"Stream {self.uuid} is not active")
+                return True
+
+            # Update status to stopping
+            await self._update_status(StreamStatus.STOPPING, reason)
+
+            # Stop endpoints through registry
+            try:
+                if self.endpoint_registry.get_endpoint(self.source_endpoint_uuid):
+                    self.endpoint_registry.stop_endpoint(self.source_endpoint_uuid)
+                if self.endpoint_registry.get_endpoint(self.destination_endpoint_uuid):
+                    self.endpoint_registry.stop_endpoint(self.destination_endpoint_uuid)
+            except Exception as stop_error:
+                logger.error(f"Error stopping endpoints: {str(stop_error)}")
+
+            # Cancel qualified messages
+            await self._cancel_qualified_messages(reason)
+
+            # Complete in-progress work
+            await self._complete_pending_work()
+
+            # Update final status
+            await self._update_status(StreamStatus.INACTIVE, "Stream stopped successfully")
+
+            await self.logger.log_event(
+                "stream_stopped",
+                {"reason": reason},
+                "success"
+            )
+            
+            return True
+            
+        except Exception as e:
+            await self.logger.log_event(
+                "stream_stop_failed",
+                {"error": str(e)},
+                "error"
+            )
+            return False
+
+    async def _validate_endpoints(self) -> Tuple[bool, Optional[str]]:
+        """Validate source and destination endpoints through registry"""
+        try:
+            # Validate source endpoint
+            source = self.endpoint_registry.get_endpoint(self.source_endpoint_uuid)
+            if not source:
+                return False, "Source endpoint not found in registry"
+
+            source_status = source.get_status()
+            if source_status.get('status') != 'ACTIVE':
+                return False, f"Source endpoint not active: {source_status.get('status')}"
+
+            # Validate destination endpoint
+            dest = self.endpoint_registry.get_endpoint(self.destination_endpoint_uuid)
+            if not dest:
+                return False, "Destination endpoint not found in registry"
+
+            dest_status = dest.get_status()
+            if dest_status.get('status') != 'ACTIVE':
+                return False, f"Destination endpoint not active: {dest_status.get('status')}"
+
+            # Verify message type compatibility
+            if not self._verify_message_type_compatibility(source.config, dest.config):
+                return False, "Message type incompatibility between endpoints"
+
+            return True, None
+            
+        except Exception as e:
+            logger.error(f"Error validating endpoints: {str(e)}")
+            return False, str(e)
+
+    async def _store_configuration(self) -> bool:
+        """Store stream configuration with endpoint details"""
+        try:
+            # Get endpoint details from registry
+            source = self.endpoint_registry.get_endpoint(self.source_endpoint_uuid)
+            dest = self.endpoint_registry.get_endpoint(self.destination_endpoint_uuid)
+
             stream_data = {
                 "uuid": self.uuid,
                 "name": self.config.name,
@@ -77,158 +251,84 @@ class BaseStream(ABC):
                 "active": self.active,
                 "created_at": datetime.utcnow(),
                 "updated_at": datetime.utcnow(),
-                "metrics": self.metrics,
-                "metadata": self.config.metadata
+                "endpoints": {
+                    "source": {
+                        "uuid": self.source_endpoint_uuid,
+                        "type": source.config.endpoint_type if source else "UNKNOWN",
+                        "status": source.get_status().get('status') if source else "UNKNOWN"
+                    },
+                    "destination": {
+                        "uuid": self.destination_endpoint_uuid,
+                        "type": dest.config.endpoint_type if dest else "UNKNOWN",
+                        "status": dest.get_status().get('status') if dest else "UNKNOWN"
+                    }
+                },
+                "metrics": {
+                    "messages_qualified": 0,
+                    "messages_transformed": 0,
+                    "messages_delivered": 0,
+                    "errors": {
+                        "transformation_errors": 0,
+                        "delivery_errors": 0
+                    }
+                },
+                "delivery_tracking": {
+                    "last_delivery_time": None,
+                    "delivery_attempts": 0,
+                    "failed_deliveries": 0,
+                    "retry_count": 0
+                },
+                "deleted": False
             }
             
-            result = mongo.db.streams_v2.insert_one(stream_data)
+            result = await mongo.db.streams_v2.insert_one(stream_data)
             return result.acknowledged
             
         except Exception as e:
             logger.error(f"Error storing stream configuration: {str(e)}")
             return False
 
-    async def start(self) -> bool:
-        """Start stream processing"""
+    async def get_status(self) -> Dict[str, Any]:
+        """Get comprehensive stream and endpoint status"""
         try:
-            if self.status == StreamStatus.ACTIVE:
-                logger.warning(f"Stream {self.uuid} is already active")
-                return True
+            stream = await mongo.db.streams_v2.find_one({"uuid": self.uuid})
+            if not stream:
+                raise StreamError(f"Stream {self.uuid} not found")
 
-            # Validate endpoints before starting
-            source_valid, dest_valid = await self._validate_endpoints()
-            if not (source_valid and dest_valid):
-                raise ValueError("Invalid endpoint configuration")
-
-            # Update status
-            self.status = StreamStatus.ACTIVE
-            self.active = True
-            
-            # Update database
-            result = mongo.db.streams_v2.update_one(
-                {"uuid": self.uuid},
-                {
-                    "$set": {
-                        "status": self.status,
-                        "active": self.active,
-                        "updated_at": datetime.utcnow()
-                    }
-                }
-            )
-            
-            if result.modified_count:
-                self._log_event("stream_started", {}, "success")
-                return True
-                
-            return False
-            
-        except Exception as e:
-            self._log_event("stream_start_failed", {"error": str(e)}, "error")
-            return False
-
-    async def stop(self) -> bool:
-        """Stop stream processing"""
-        try:
-            if self.status == StreamStatus.INACTIVE:
-                logger.warning(f"Stream {self.uuid} is already inactive")
-                return True
-
-            # Update status
-            self.status = StreamStatus.INACTIVE
-            self.active = False
-            
-            # Update database
-            result = mongo.db.streams_v2.update_one(
-                {"uuid": self.uuid},
-                {
-                    "$set": {
-                        "status": self.status,
-                        "active": self.active,
-                        "updated_at": datetime.utcnow()
-                    }
-                }
-            )
-            
-            if result.modified_count:
-                self._log_event("stream_stopped", {}, "success")
-                return True
-                
-            return False
-            
-        except Exception as e:
-            self._log_event("stream_stop_failed", {"error": str(e)}, "error")
-            return False
-
-    @abstractmethod
-    async def _validate_endpoints(self) -> Tuple[bool, bool]:
-        """
-        Validate source and destination endpoints
-        Returns: Tuple of (source_valid, destination_valid)
-        """
-        pass
-
-    @abstractmethod
-    async def process_message(self, message: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
-        """Process a single message"""
-        pass
-
-    def update_metrics(self, metrics_data: Dict[str, Any]) -> None:
-        """Update stream metrics"""
-        try:
-            # Update local metrics
-            self.metrics.update(metrics_data)
-            self.metrics['updated_at'] = datetime.utcnow()
-            
-            # Update database
-            mongo.db.streams_v2.update_one(
-                {"uuid": self.uuid},
-                {
-                    "$set": {
-                        "metrics": self.metrics,
-                        "updated_at": datetime.utcnow()
-                    }
-                }
-            )
-            
-        except Exception as e:
-            logger.error(f"Error updating metrics for stream {self.uuid}: {str(e)}")
-
-    def get_status(self) -> Dict[str, Any]:
-        """Get current stream status and metrics"""
-        try:
-            stream_data = mongo.db.streams_v2.find_one({"uuid": self.uuid})
-            if not stream_data:
-                raise ValueError(f"Stream {self.uuid} not found")
+            # Get endpoint statuses from registry
+            source_endpoint = self.endpoint_registry.get_endpoint(self.source_endpoint_uuid)
+            dest_endpoint = self.endpoint_registry.get_endpoint(self.destination_endpoint_uuid)
 
             return {
                 "uuid": self.uuid,
-                "status": stream_data.get("status", StreamStatus.INACTIVE),
-                "active": stream_data.get("active", False),
-                "metrics": stream_data.get("metrics", {}),
-                "last_updated": stream_data.get("updated_at")
+                "status": stream.get("status", StreamStatus.INACTIVE),
+                "active": stream.get("active", False),
+                "metrics": stream.get("metrics", {}),
+                "delivery_tracking": stream.get("delivery_tracking", {}),
+                "last_active": stream.get("last_active"),
+                "updated_at": stream.get("updated_at"),
+                "endpoints": {
+                    "source": {
+                        "uuid": self.source_endpoint_uuid,
+                        "status": source_endpoint.get_status() if source_endpoint else {"status": "NOT_FOUND"},
+                        "type": source_endpoint.config.endpoint_type if source_endpoint else "UNKNOWN"
+                    },
+                    "destination": {
+                        "uuid": self.destination_endpoint_uuid,
+                        "status": dest_endpoint.get_status() if dest_endpoint else {"status": "NOT_FOUND"},
+                        "type": dest_endpoint.config.endpoint_type if dest_endpoint else "UNKNOWN"
+                    }
+                }
             }
-            
+
         except Exception as e:
-            logger.error(f"Error getting status for stream {self.uuid}: {str(e)}")
+            logger.error(f"Error getting stream status: {str(e)}")
             return {
                 "uuid": self.uuid,
-                "status": StreamStatus.ERROR,
+                "status": "ERROR",
                 "error": str(e)
             }
 
-    def _log_event(self, event_type: str, details: Dict[str, Any], status: str) -> None:
-        """Log stream event"""
-        try:
-            log_message_cycle(
-                message_uuid=str(uuid.uuid4()),  # Generate new UUID for stream events
-                event_type=event_type,
-                details={
-                    "stream_uuid": self.uuid,
-                    "stream_name": self.config.name,
-                    **details
-                },
-                status=status,
-                organization_uuid=self.organization_uuid
-            )
-        except Exception as e:
-            logger.error(f"Error logging stream event: {str(e)}")
+    def __str__(self) -> str:
+        """String representation"""
+        return f"Stream(uuid={self.uuid}, status={self.status})"

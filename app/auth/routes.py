@@ -27,7 +27,7 @@ class CreateOrganizationForm(FlaskForm):
 @bp.route('/login', methods=['GET', 'POST'])
 def login():
     if g.user:
-        return redirect(url_for('main.dashboard'))
+        return redirect(url_for('main.view_home'))
         
     form = LoginForm()
     if form.validate_on_submit():

@@ -3,6 +3,7 @@
 {% block content %}
 <div class="main-content">
     <div class="stream-detail-container">
+        {# Header Section #}
         <div class="stream-detail-header">
             <h1>{{ stream.name }}</h1>
             <div class="stream-detail-path">
@@ -10,27 +11,87 @@
             </div>
         </div>
 
-        {# Tabs #}
-        <div class="stream-tabs">
-            <div class="stream-tab {% if active_tab == 'details' %}active{% endif %}" 
-                onclick="switchTab('details')">Stream Details</div>
-            <div class="stream-tab {% if active_tab == 'logs' %}active{% endif %}" 
-                onclick="switchTab('logs')">Logs</div>
+        {# Tabs Navigation #}
+        <div class="tabs">
+            <button class="tab-button" onclick="openTab(event, 'details-content')" id="defaultTab">Stream Details</button>
+            <button class="tab-button" onclick="openTab(event, 'logs-content')">Logs</button>
         </div>
 
-        {# Stream Details Tab #}
-        <div class="stream-content details {% if active_tab == 'details' %}active{% endif %}">
-            {# Stream Controls #}
+        {# Stream Details Tab Content #}
+        <div id="details-content" class="tab-content">
+            {# Stream Information #}
+            <div class="stream-info-panel">
+                <div class="info-row">
+                    <div class="info-label">Name:</div>
+                    <div class="info-value">{{ stream.name }}</div>
+                </div>
+                <div class="info-row">
+                    <div class="info-label">Destination Message Type:</div>
+                    <div class="info-value">{{ stream.message_type }}</div>
+                </div>
+            </div>
+
+            {# Source Endpoints Panel #}
+            <div class="endpoint-panel">
+                <div class="endpoint-header">
+                    <div class="endpoint-title">Source Endpoints:</div>
+                    <button class="expand-btn" onclick="toggleSection('source-details')">
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                </div>
+                <div class="endpoint-summary">{{ stream.source_endpoint.name }}</div>
+                <div class="endpoint-details" id="source-details" style="display: none;">
+                    <div class="info-row">
+                        <div class="info-label">Mode:</div>
+                        <div class="info-value">{{ stream.source_endpoint.mode|title }}</div>
+                    </div>
+                    <div class="info-row">
+                        <div class="info-label">Message Type:</div>
+                        <div class="info-value">{{ stream.source_endpoint.message_type }}</div>
+                    </div>
+                    <div class="info-row">
+                        <div class="info-label">Type:</div>
+                        <div class="info-value">{{ stream.source_endpoint.endpoint_type|upper }}</div>
+                    </div>
+                </div>
+            </div>
+
+            {# Destination Endpoint Panel #}
+            <div class="endpoint-panel">
+                <div class="endpoint-header">
+                    <div class="endpoint-title">Destination Endpoint:</div>
+                    <button class="expand-btn" onclick="toggleSection('destination-details')">
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                </div>
+                <div class="endpoint-summary">{{ stream.destination_endpoint.name }}</div>
+                <div class="endpoint-details" id="destination-details" style="display: none;">
+                    <div class="info-row">
+                        <div class="info-label">Mode:</div>
+                        <div class="info-value">{{ stream.destination_endpoint.mode|title }}</div>
+                    </div>
+                    <div class="info-row">
+                        <div class="info-label">Message Type:</div>
+                        <div class="info-value">{{ stream.destination_endpoint.message_type }}</div>
+                    </div>
+                    <div class="info-row">
+                        <div class="info-label">Type:</div>
+                        <div class="info-value">{{ stream.destination_endpoint.endpoint_type|upper }}</div>
+                    </div>
+                </div>
+            </div>
+
+            {# Action Buttons - Only in details tab #}
             {% if not stream.deleted and g.user_role == 'admin' %}
-                <div class="stream-controls">
+                <div class="stream-actions">
                     {% if stream.status != "ACTIVE" %}
-                        <button class="btn btn-secondary start-stream" 
+                        <button class="btn btn-primary start-stream" 
                                 data-stream-id="{{ stream.uuid }}"
                                 {% if stream.status == "STARTING" %}disabled{% endif %}>
                             {% if stream.status == "STARTING" %}Starting...{% else %}Start{% endif %}
                         </button>
                     {% else %}
-                        <button class="btn btn-outline stop-stream" 
+                        <button class="btn btn-warning stop-stream" 
                                 data-stream-id="{{ stream.uuid }}"
                                 {% if stream.status == "STOPPING" %}disabled{% endif %}>
                             {% if stream.status == "STOPPING" %}Stopping...{% else %}Stop{% endif %}
@@ -40,177 +101,101 @@
                     <button class="btn btn-danger" onclick="showDeleteModal()">Delete Stream</button>
                 </div>
             {% endif %}
+        </div>
 
-            {# Stream Information #}
-            <div class="stream-panel">
-                <div class="stream-panel-row">
-                    <div class="stream-panel-label">Name:</div>
-                    <div class="stream-panel-value">{{ stream.name }}</div>
-                </div>
-                <div class="stream-panel-row">
-                    <div class="stream-panel-label">Destination Message Type:</div>
-                    <div class="stream-panel-value">{{ stream.message_type }}</div>
-                </div>
-            </div>
-
-            {# Source Endpoints #}
-            <div class="endpoint-panel">
-                <div class="endpoint-panel-header">
-                    <div class="endpoint-panel-title">Source Endpoints:</div>
-                    <div class="endpoint-toggle" onclick="toggleEndpoints('source')">+ show more</div>
-                </div>
-                
-                <div class="endpoint-summary">
-                    {{ stream.source_endpoint.name }}
-                    {% if stream.source_endpoints|length > 1 %}
-                        <span class="more-count">+{{ stream.source_endpoints|length - 1 }} more</span>
-                    {% endif %}
-                </div>
-
-                <div class="endpoint-details" id="source-details">
-                    {% for endpoint in stream.source_endpoints %}
-                        <div class="stream-panel-row">
-                            <div class="stream-panel-label">Mode:</div>
-                            <div class="stream-panel-value">{{ endpoint.mode|title }}</div>
-                        </div>
-                        <div class="stream-panel-row">
-                            <div class="stream-panel-label">Message Type:</div>
-                            <div class="stream-panel-value">{{ endpoint.message_type }}</div>
-                        </div>
-                        <div class="stream-panel-row">
-                            <div class="stream-panel-label">Type:</div>
-                            <div class="stream-panel-value">{{ endpoint.endpoint_type|upper }}</div>
+        {# Logs Tab Content #}
+        <div id="logs-content" class="tab-content">
+            <div class="logs-container">
+                {% if stream_logs %}
+                    {% for log in stream_logs %}
+                        <div class="log-entry {{ log.status }}">
+                            <div class="log-timestamp">{{ log.timestamp|datetime }}</div>
+                            <div class="log-message">{{ log.event_type }}</div>
+                            {% if log.details %}
+                                <div class="log-details">
+                                    <pre>{{ log.details|tojson(indent=2) }}</pre>
+                                </div>
+                            {% endif %}
                         </div>
                     {% endfor %}
-                </div>
-            </div>
-
-            {# Destination Endpoint #}
-            <div class="endpoint-panel">
-                <div class="endpoint-panel-header">
-                    <div class="endpoint-panel-title">Destination Endpoint:</div>
-                    <div class="endpoint-toggle" onclick="toggleEndpoints('destination')">+ show more</div>
-                </div>
-                
-                <div class="endpoint-summary">
-                    {{ stream.destination_endpoint.name }}
-                </div>
-
-                <div class="endpoint-details" id="destination-details">
-                    <div class="stream-panel-row">
-                        <div class="stream-panel-label">Mode:</div>
-                        <div class="stream-panel-value">{{ stream.destination_endpoint.mode|title }}</div>
+                {% else %}
+                    <div class="empty-state">
+                        <p>No logs available for this stream.</p>
                     </div>
-                    <div class="stream-panel-row">
-                        <div class="stream-panel-label">Message Type:</div>
-                        <div class="stream-panel-value">{{ stream.destination_endpoint.message_type }}</div>
-                    </div>
-                    <div class="stream-panel-row">
-                        <div class="stream-panel-label">Type:</div>
-                        <div class="stream-panel-value">{{ stream.destination_endpoint.endpoint_type|upper }}</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        {# Stream Logs Tab #}
-        <div class="stream-content logs {% if active_tab == 'logs' %}active{% endif %}">
-            {% if stream_logs %}
-                {% for log in stream_logs %}
-                    <div class="log-entry {{ log.status }}">
-                        <div class="log-timestamp">{{ log.timestamp|datetime }}</div>
-                        <div class="log-message">{{ log.event_type }}</div>
-                        {% if log.details %}
-                            <div class="log-details">{{ log.details|tojson(indent=2) }}</div>
-                        {% endif %}
-                    </div>
-                {% endfor %}
-            {% else %}
-                <div class="empty-state">
-                    <p>No logs available for this stream.</p>
-                </div>
-            {% endif %}
-        </div>
-
-        {# Delete Confirmation Modal #}
-        <div class="delete-modal" id="deleteModal">
-            <div class="delete-modal-content">
-                <div class="delete-modal-header">
-                    <h3>Are you sure you want to delete this stream?</h3>
-                </div>
-                <div class="delete-modal-body">
-                    This cannot be undone.
-                </div>
-                <div class="delete-modal-actions">
-                    <button class="btn btn-secondary" onclick="hideDeleteModal()">Cancel</button>
-                    <button class="btn btn-danger" onclick="deleteStream()">Yes, Delete</button>
-                </div>
+                {% endif %}
             </div>
         </div>
     </div>
 </div>
+
+{# Delete Modal #}
+<div class="modal" id="deleteModal" tabindex="-1" style="display: none;">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Delete Stream</h5>
+                <button type="button" class="close" onclick="hideDeleteModal()">
+                    <span>&times;</span>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p>Are you sure you want to delete this stream? This action cannot be undone.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" onclick="hideDeleteModal()">Cancel</button>
+                <button type="button" class="btn btn-danger" onclick="deleteStream()">Delete</button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
 {% block scripts %}
 <script>
-function switchTab(tab) {
-    document.querySelectorAll('.stream-tab').forEach(t => {
-        t.classList.remove('active');
-    });
-    document.querySelectorAll('.stream-content').forEach(c => {
-        c.classList.remove('active');
-    });
-    
-    document.querySelector(`.stream-tab:contains('${tab}')`).classList.add('active');
-    document.querySelector(`.stream-content.${tab}`).classList.add('active');
+function openTab(evt, tabName) {
+    // Hide all tab content
+    var tabContents = document.getElementsByClassName("tab-content");
+    for (var i = 0; i < tabContents.length; i++) {
+        tabContents[i].style.display = "none";
+    }
+
+    // Remove active class from all tab buttons
+    var tabButtons = document.getElementsByClassName("tab-button");
+    for (var i = 0; i < tabButtons.length; i++) {
+        tabButtons[i].classList.remove("active");
+    }
+
+    // Show the selected tab content and mark button as active
+    document.getElementById(tabName).style.display = "block";
+    evt.currentTarget.classList.add("active");
 }
 
-function toggleEndpoints(type) {
-    const details = document.getElementById(`${type}-details`);
-    const toggle = details.closest('.endpoint-panel').querySelector('.endpoint-toggle');
+function toggleSection(sectionId) {
+    const section = document.getElementById(sectionId);
+    const button = event.currentTarget;
+    const icon = button.querySelector('i');
     
-    if (details.classList.contains('show')) {
-        details.classList.remove('show');
-        toggle.textContent = '+ show more';
+    if (section.style.display === "none" || !section.style.display) {
+        section.style.display = "block";
+        icon.classList.remove('fa-chevron-down');
+        icon.classList.add('fa-chevron-up');
     } else {
-        details.classList.add('show');
-        toggle.textContent = '- show less';
+        section.style.display = "none";
+        icon.classList.remove('fa-chevron-up');
+        icon.classList.add('fa-chevron-down');
     }
 }
 
 function showDeleteModal() {
-    document.getElementById('deleteModal').classList.add('show');
+    document.getElementById('deleteModal').style.display = 'block';
 }
 
 function hideDeleteModal() {
-    document.getElementById('deleteModal').classList.remove('show');
-}
-
-function deleteStream() {
-    const streamId = '{{ stream.uuid }}';
-    
-    fetch(`/streams/${streamId}/delete`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CSRFToken': '{{ csrf_token() }}'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.status === 'success') {
-            window.location.href = '{{ url_for("streams.view_streams") }}';
-        } else {
-            throw new Error(data.message);
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        alert('An error occurred while deleting the stream');
-        hideDeleteModal();
-    });
+    document.getElementById('deleteModal').style.display = 'none';
 }
 
 // Stream control handlers
-document.addEventListener('DOMContentLoaded', function() {
+function setupStreamControls() {
     function handleStreamAction(action, streamId, button) {
         button.disabled = true;
         button.textContent = action === 'start' ? 'Starting...' : 'Stopping...';
@@ -239,17 +224,50 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     document.querySelectorAll('.start-stream').forEach(button => {
-        button.addEventListener('click', e => {
+        button.addEventListener('click', () => {
             handleStreamAction('start', button.dataset.streamId, button);
         });
     });
 
     document.querySelectorAll('.stop-stream').forEach(button => {
-        button.addEventListener('click', e => {
+        button.addEventListener('click', () => {
             handleStreamAction('stop', button.dataset.streamId, button);
         });
     });
+}
+
+// Initialize page
+document.addEventListener('DOMContentLoaded', function() {
+    // Open default tab
+    document.getElementById('defaultTab').click();
+    
+    // Setup stream controls
+    setupStreamControls();
 });
+
+function deleteStream() {
+    const streamId = '{{ stream.uuid }}';
+    
+    fetch(`/streams/${streamId}/delete`, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'X-CSRFToken': '{{ csrf_token() }}'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.status === 'success') {
+            window.location.href = '{{ url_for("streams.view_streams") }}';
+        } else {
+            throw new Error(data.message);
+        }
+    })
+    .catch(error => {
+        console.error('Error:', error);
+        alert('An error occurred while deleting the stream');
+        hideDeleteModal();
+    });
+}
 </script>
-{% endblock %}
 {% endblock %}

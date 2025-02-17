@@ -3735,7 +3735,7 @@ select.form-control {
 
 .endpoint-status {
     color: #dc3545;
-    font-size: 16px;
+    font-size: 14px;
     margin-bottom:24px;
 }
 
@@ -4853,7 +4853,7 @@ select[readonly] {
 
 /* Quick Actions - Fixed Layout */
 .quick-actions {
-    background: #FFFFFF;
+    background: #E4F8F0;
     border: 1px solid #E0E0E0;
     border-radius: 8px;
     padding: 24px;

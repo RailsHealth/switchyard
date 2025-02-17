@@ -57,12 +57,10 @@ def view_home():
 def get_dashboard_stats():
     """Get real-time dashboard statistics"""
     try:
-        # Get UTC datetime for today's start
-        # Frontend will adjust this based on local timezone
         today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         org_uuid = g.organization['uuid']
 
-        # Basic counts
+        # Basic counts remain the same
         streams_count = mongo.db.streams_v2.count_documents({
             "organization_uuid": org_uuid,
             "deleted": {"$ne": True}
@@ -85,7 +83,7 @@ def get_dashboard_stats():
             "deleted": {"$ne": True}
         })
 
-        # Get source endpoint UUIDs
+        # Get endpoint UUIDs
         source_endpoint_uuids = [
             e["uuid"] for e in mongo.db.endpoints.find(
                 {
@@ -97,7 +95,6 @@ def get_dashboard_stats():
             )
         ]
 
-        # Get destination endpoint UUIDs
         destination_endpoint_uuids = [
             e["uuid"] for e in mongo.db.endpoints.find(
                 {
@@ -109,18 +106,34 @@ def get_dashboard_stats():
             )
         ]
 
-        # Count messages
+        # Count received messages from messages collection
         messages_received = mongo.db.messages.count_documents({
             "organization_uuid": org_uuid,
             "timestamp": {"$gte": today_start},
             "endpoint_uuid": {"$in": source_endpoint_uuids}
         }) if source_endpoint_uuids else 0
 
-        messages_sent = mongo.db.messages.count_documents({
-            "organization_uuid": org_uuid,
-            "timestamp": {"$gte": today_start},
-            "endpoint_uuid": {"$in": destination_endpoint_uuids}
-        }) if destination_endpoint_uuids else 0
+        # Count sent messages - counting per endpoint in destinations array
+        messages_sent = 0
+        if destination_endpoint_uuids:
+            for endpoint_uuid in destination_endpoint_uuids:
+                endpoint_sent = mongo.db.destination_messages.count_documents({
+                    "organization_uuid": org_uuid,
+                    "destinations": {
+                        "$elemMatch": {
+                            "endpoint_uuid": endpoint_uuid,
+                            "status": "COMPLETED",
+                            "updated_at": {"$gte": today_start}
+                        }
+                    }
+                })
+                messages_sent += endpoint_sent
+
+        # Log statistics for debugging
+        logger.debug(f"Dashboard stats for org {org_uuid}: "
+                    f"received={messages_received}, sent={messages_sent}, "
+                    f"source_endpoints={len(source_endpoint_uuids)}, "
+                    f"dest_endpoints={len(destination_endpoint_uuids)}")
 
         return jsonify({
             "streams_count": streams_count,
@@ -129,7 +142,7 @@ def get_dashboard_stats():
             "destination_endpoints_count": destination_endpoints,
             "messages_received_today": messages_received,
             "messages_sent_today": messages_sent,
-            "server_time": today_start.isoformat()  # Include server time for reference
+            "server_time": today_start.isoformat()
         })
 
     except Exception as e:

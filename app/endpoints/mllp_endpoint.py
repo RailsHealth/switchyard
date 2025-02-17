@@ -1065,6 +1065,123 @@ class MLLPEndpoint(BaseEndpoint):
         except Exception as e:
             self.log_error(f"Error during cleanup: {str(e)}")
             raise
+    
+    def deliver_message(self, message_content: Dict[str, Any], metadata: Optional[Dict] = None) -> Tuple[bool, Optional[str]]:
+        """
+        Deliver message over MLLP connection
+        
+        Args:
+            message_content: Message content to deliver
+            metadata: Optional metadata for message delivery
+            
+        Returns:
+            Tuple[bool, str]: (success, error_message)
+        """
+        try:
+            if not isinstance(message_content, dict):
+                return False, "Message content must be a dictionary"
+                
+            # Extract HL7 message from content
+            hl7_message = message_content.get('message')
+            if not hl7_message:
+                return False, "No HL7 message found in content"
+                
+            # Create connection
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(self.timeout)
+            
+            try:
+                # Connect to destination
+                sock.connect((self.host, self.port))
+                
+                # Wrap message in MLLP format
+                wrapped_message = MLLPProtocol.wrap_message(hl7_message)
+                
+                # Send message
+                sock.sendall(wrapped_message)
+                
+                # Wait for acknowledgment
+                buffer = sock.recv(MAX_BUFFER_SIZE)
+                if not buffer:
+                    return False, "No acknowledgment received"
+                    
+                # Process acknowledgment
+                try:
+                    ack = MLLPProtocol.unwrap_message(buffer)
+                    if "MSA|AA|" in ack:
+                        self.log_info(f"Message delivered successfully with ACK: {ack}")
+                        return True, None
+                    else:
+                        self.log_warning(f"Received NACK: {ack}")
+                        return False, f"Negative acknowledgment received: {ack}"
+                except MLLPProtocolError as e:
+                    return False, f"Invalid acknowledgment format: {str(e)}"
+                    
+            finally:
+                sock.close()
+                
+        except socket.error as e:
+            return False, f"Socket error: {str(e)}"
+        except Exception as e:
+            return False, f"Delivery error: {str(e)}"
+
+    def validate_message_format(self, message_content: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
+        """
+        Validate HL7 message format
+        
+        Args:
+            message_content: Message content to validate
+            
+        Returns:
+            Tuple[bool, str]: (is_valid, error_message)
+        """
+        try:
+            # Validate content type
+            if not isinstance(message_content, dict):
+                return False, "Message content must be a dictionary"
+                
+            # Check required fields
+            required_fields = ['message', 'message_type']
+            missing_fields = [field for field in required_fields if field not in message_content]
+            if missing_fields:
+                return False, f"Missing required fields: {', '.join(missing_fields)}"
+                
+            # Get message
+            message = message_content['message']
+            if not isinstance(message, str):
+                return False, "Message must be a string"
+                
+            # Basic HL7 validation
+            if not message.startswith('MSH|'):
+                return False, "Invalid HL7 message format - must start with MSH segment"
+                
+            # Validate message type
+            try:
+                segments = message.split('\r')
+                msh = segments[0].split('|')
+                if len(msh) < 9:
+                    return False, "Invalid MSH segment - missing required fields"
+                    
+                message_type = msh[8].split('^')[0]
+                if not message_type:
+                    return False, "Missing message type in MSH segment"
+                    
+            except Exception as e:
+                return False, f"Error parsing message segments: {str(e)}"
+                
+            # Attempt full parsing if hl7apy is available
+            try:
+                from hl7apy.parser import parse_message
+                parse_message(message, find_groups=False, validation_level=2)
+            except ImportError:
+                self.log_warning("hl7apy not available for detailed message validation")
+            except Exception as e:
+                return False, f"Message parsing failed: {str(e)}"
+                
+            return True, None
+            
+        except Exception as e:
+            return False, f"Validation error: {str(e)}"
 
     def __str__(self) -> str:
         """String representation"""
