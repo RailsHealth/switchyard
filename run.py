@@ -84,10 +84,9 @@ def start_celery_beat():
         '-A', 'app.extensions.celery_worker:celery',
         'beat',
         '--loglevel=info',
-        '--scheduler', 'django_celery_beat.schedulers:DatabaseScheduler',  # Use persistent scheduler
-        '--max-interval', '60',  # Maximum time between schedule checks
-        '--schedule', '/tmp/celerybeat-schedule',  # Persistent schedule file
-        '--pidfile', '/tmp/celerybeat.pid'  # PID file location
+        '--max-interval', '60',
+        '--schedule', '/tmp/celerybeat-schedule',
+        '--pidfile', '/tmp/celerybeat.pid'
     ]
     
     # Create logs directory if it doesn't exist

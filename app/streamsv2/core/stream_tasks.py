@@ -142,7 +142,6 @@ def monitor_streams(self) -> None:
                     {"uuid": stream['uuid']},
                     {
                         "$set": {
-                            "last_processing_attempt": datetime.utcnow(),
                             "monitoring": {
                                 "last_check": datetime.utcnow(),
                                 "status": "processing",
@@ -157,6 +156,7 @@ def monitor_streams(self) -> None:
                         }
                     }
                 )
+
 
             except Exception as stream_error:
                 logger.error(f"Error processing stream {stream.get('uuid')}: {str(stream_error)}")
@@ -305,6 +305,7 @@ def process_stream_messages(self, stream_uuid: str) -> str:
         qualifying_count = len(qualifying_messages)
         logger.info(f"Found {qualifying_count} qualifying messages")
         
+        qualified_count = 0
         if qualifying_count > 0:
             # Mark messages as qualified
             qualified_count = qualifier.mark_messages_qualified(qualifying_messages)
@@ -333,7 +334,8 @@ def process_stream_messages(self, stream_uuid: str) -> str:
             "completion_time": datetime.utcnow().isoformat()
         })
 
-        # Update last processing attempt
+        # Move last_processing_attempt update here after all processing is done
+        # This ensures we can check for new messages sooner
         mongo.db.streams_v2.update_one(
             {"uuid": stream_uuid},
             {
