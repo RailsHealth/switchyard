@@ -1,4 +1,4 @@
-# switchyard
+# Switchyard
 A Flask-based application designed to handle the conversion of various health data formats (HL7v2, CCDA, Clinical Notes, X12) to FHIR (Fast Healthcare Interoperability Resources).
 
 
